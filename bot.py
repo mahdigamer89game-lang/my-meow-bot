@@ -399,7 +399,8 @@ async def main():
         await app.start()
         await app.updater.start_polling()
         print("Bot started... ✅")
-        await app.updater.idle()
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())
