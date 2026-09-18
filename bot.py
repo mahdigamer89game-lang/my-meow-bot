@@ -1,6 +1,8 @@
 import asyncio
 import sqlite3
 import logging
+import os
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -8,7 +10,7 @@ from telegram.ext import (
 )
 
 # ============ تنظیمات ============
-TOKEN = "8715521188:AAExff8YrkayI3yRFJjPThvgvLUeCa4ENSY"
+TOKEN = os.environ.get("TOKEN")
 ADMIN_ID = 1713081033
 SUPPORT_USERNAME = "@Goooorba1234"
 CARD_NUMBER = "5047061673513814"
@@ -377,7 +379,7 @@ conv = ConversationHandler(
 app.add_handler(conv, group=0)
 app.add_handler(CallbackQueryHandler(charge_callback, pattern="^charge_"), group=1)
 
-print("Bot started... ✅")
+# ============ وب‌سرور برای Render ============
 async def start_web_server():
     async def handle(request):
         return web.Response(text="Bot is running ✅")
@@ -396,6 +398,7 @@ async def main():
     async with app:
         await app.start()
         await app.updater.start_polling()
+        print("Bot started... ✅")
         await app.updater.idle()
 
 if __name__ == '__main__':
