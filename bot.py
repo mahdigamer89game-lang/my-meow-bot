@@ -1,4 +1,5 @@
-import sqlite3
+from aiohttp import web
+import asyncioimport sqlite3
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -377,4 +378,26 @@ app.add_handler(conv, group=0)
 app.add_handler(CallbackQueryHandler(charge_callback, pattern="^charge_"), group=1)
 
 print("Bot started... ✅")
-app.run_polling()
+async def start_web_server():
+    async def handle(request):
+        return web.Response(text="Bot is running ✅")
+    
+    web_app = web.Application()
+    web_app.router.add_get('/', handle)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.environ.get('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Web server started on port {port}")
+
+async def main():
+    await start_web_server()
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+        while True:
+            await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    asyncio.run(main()
