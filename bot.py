@@ -396,8 +396,7 @@ async def main():
     async with app:
         await app.start()
         await app.updater.start_polling()
-        while True:
-            await asyncio.sleep(3600)
+        await app.updater.idle()
 
 if __name__ == '__main__':
-    asyncio.run(main()
+    asyncio.run(main())
