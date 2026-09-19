@@ -135,7 +135,6 @@ async def start(update, context):
 async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
-
     if text == "🛒 خرید میو پوینت":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("بالای 100 میلیون", callback_data="cat_high")],
@@ -531,8 +530,12 @@ conv = ConversationHandler(
             MessageHandler(filters.Regex("^📖 راهنما$"), menu_router),
             MessageHandler(filters.Regex("^🔐 پنل ادمین$"), menu_router),
         ],
-        BUY_CAT: [CallbackQueryHandler(buy_cat_selected, pattern="^cat_")],
-        BUY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_amount_entered)],
+        BUY_CAT: [
+            CallbackQueryHandler(buy_cat_selected, pattern="^cat_"),
+        ],
+        BUY_AMOUNT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, buy_amount_entered),
+        ],
         BUY_CARD: [
             CallbackQueryHandler(pay_wallet, pattern="^pay_wallet$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, buy_card_entered),
@@ -541,22 +544,38 @@ conv = ConversationHandler(
             MessageHandler(filters.Regex("^💳 شارژ کیف پول$"), wallet_charge_start),
             MessageHandler(filters.Regex("^🔙 بازگشت$"), back_to_menu),
         ],
-        WALLET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_amount_entered)],
-        WALLET_PHOTO: [MessageHandler(filters.PHOTO, wallet_photo_received)],
-        ADMIN_PANEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_router)],
-        ADMIN_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast)],
-        ADMIN_SET_PRICE_HIGH: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_set_price_high)],
-        ADMIN_SET_PRICE_LOW: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_set_price_low)],
-        SUPPORT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, support_message)],
+        WALLET_AMOUNT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_amount_entered),
+        ],
+        WALLET_PHOTO: [
+            MessageHandler(filters.PHOTO, wallet_photo_received),
+        ],
+        ADMIN_PANEL: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_router),
+        ],
+        ADMIN_BROADCAST: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast),
+        ],
+        ADMIN_SET_PRICE_HIGH: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_set_price_high),
+        ],
+        ADMIN_SET_PRICE_LOW: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_set_price_low),
+        ],
+        SUPPORT_MESSAGE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, support_message),
+        ],
     },
-    fallbacks=[CommandHandler("start", start)],
+    fallbacks=[
+        CommandHandler("start", start),
+        CallbackQueryHandler(charge_callback, pattern="^charge_"),
+        CallbackQueryHandler(deliver_callback, pattern="^deliver_"),
+        CallbackQueryHandler(reply_callback, pattern="^reply_"),
+    ],
     allow_reentry=True,
 )
 
 app.add_handler(conv, group=0)
-app.add_handler(CallbackQueryHandler(charge_callback, pattern="^charge_"), group=1)
-app.add_handler(CallbackQueryHandler(deliver_callback, pattern="^deliver_"), group=1)
-app.add_handler(CallbackQueryHandler(reply_callback, pattern="^reply_"), group=1)
 app.add_handler(MessageHandler(
     filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID),
     send_reply
@@ -567,6 +586,7 @@ async def start_web_server():
         return web.Response(text="Bot is running ✅")
     web_app = web.Application()
     web_app.router.add_get('/', handle)
+    web_app.router.add_route('*', '/ping', handle)
     runner = web.AppRunner(web_app)
     await runner.setup()
     port = int(os.environ.get('PORT', 10000))
