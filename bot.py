@@ -568,14 +568,14 @@ conv = ConversationHandler(
     },
     fallbacks=[
         CommandHandler("start", start),
-        CallbackQueryHandler(charge_callback, pattern="^charge_"),
-        CallbackQueryHandler(deliver_callback, pattern="^deliver_"),
-        CallbackQueryHandler(reply_callback, pattern="^reply_"),
     ],
     allow_reentry=True,
 )
 
 app.add_handler(conv, group=0)
+app.add_handler(CallbackQueryHandler(charge_callback, pattern="^charge_"), group=1)
+app.add_handler(CallbackQueryHandler(deliver_callback, pattern="^deliver_"), group=1)
+app.add_handler(CallbackQueryHandler(reply_callback, pattern="^reply_"), group=1)
 app.add_handler(MessageHandler(
     filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID),
     send_reply
