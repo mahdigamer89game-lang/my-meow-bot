@@ -1,5 +1,4 @@
 import asyncio
-import sqlite3
 import logging
 import os
 import random
@@ -13,8 +12,11 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
+import psycopg2
+from psycopg2 import pool
 
 TOKEN = os.environ.get("TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_ID = 1713081033
 BOT_USERNAME = "Meowie_buybot"
 CARD_NUMBER = "5047061673513814"
@@ -25,40 +27,77 @@ MIN_REFERRALS = 5
 
 logging.basicConfig(level=logging.INFO)
 
-conn = sqlite3.connect("bot.db", check_same_thread=False)
-c = conn.cursor()
-c.execute("""CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    wallet INTEGER DEFAULT 0,
-    ref_code TEXT UNIQUE,
-    referred_by INTEGER,
-    referrals_count INTEGER DEFAULT 0,
-    total_reward INTEGER DEFAULT 0
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS pending_charges (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER, amount INTEGER, photo_id TEXT, status TEXT DEFAULT 'pending'
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""")
-c.execute("""CREATE TABLE IF NOT EXISTS states (user_id INTEGER PRIMARY KEY, state TEXT, data TEXT)""")
-c.execute("""CREATE TABLE IF NOT EXISTS withdraw_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER, amount INTEGER, card TEXT, status TEXT DEFAULT 'pending'
-)""")
-conn.commit()
+connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
+
+def db_execute(query, params=None, fetch=False):
+    conn = connection_pool.getconn()
+    try:
+        c = conn.cursor()
+        c.execute(query, params)
+        if fetch:
+            result = c.fetchone()
+        else:
+            result = None
+        conn.commit()
+        c.close()
+        return result
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"DB Error: {e}")
+        raise
+    finally:
+        connection_pool.putconn(conn)
+
+def db_execute_all(query, params=None):
+    conn = connection_pool.getconn()
+    try:
+        c = conn.cursor()
+        c.execute(query, params)
+        result = c.fetchall()
+        c.close()
+        return result
+    except Exception as e:
+        logging.error(f"DB Error: {e}")
+        raise
+    finally:
+        connection_pool.putconn(conn)
+
+def init_db():
+    queries = [
+        """CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            wallet BIGINT DEFAULT 0,
+            ref_code VARCHAR(10) UNIQUE,
+            referred_by BIGINT,
+            referrals_count INTEGER DEFAULT 0,
+            total_reward BIGINT DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_charges (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT, amount BIGINT, photo_id TEXT, status TEXT DEFAULT 'pending'
+        )""",
+        """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
+        """CREATE TABLE IF NOT EXISTS states (user_id BIGINT PRIMARY KEY, state TEXT, data TEXT)""",
+        """CREATE TABLE IF NOT EXISTS withdraw_requests (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending'
+        )"""
+    ]
+    for q in queries:
+        db_execute(q)
+
+init_db()
 
 def get_setting(key, default):
-    c.execute("SELECT value FROM settings WHERE key=?", (key,))
-    r = c.fetchone()
+    r = db_execute("SELECT value FROM settings WHERE key=%s", (key,), fetch=True)
     if r is None:
-        c.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, str(default)))
-        conn.commit()
+        db_execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, str(default)))
         return default
     return int(r[0])
 
 def set_setting(key, value):
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
-    conn.commit()
+    db_execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""", (key, str(value)))
 
 def get_price_high(): return get_setting("price_high", 2100)
 def get_price_low(): return get_setting("price_low", 2500)
@@ -67,58 +106,52 @@ def get_threshold(): return get_setting("threshold", 100)
 def gen_ref_code():
     while True:
         code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        c.execute("SELECT 1 FROM users WHERE ref_code=?", (code,))
-        if not c.fetchone():
+        r = db_execute("SELECT 1 FROM users WHERE ref_code=%s", (code,), fetch=True)
+        if not r:
             return code
 
 def get_wallet(uid):
-    c.execute("SELECT wallet FROM users WHERE user_id=?", (uid,))
-    r = c.fetchone()
+    r = db_execute("SELECT wallet FROM users WHERE user_id=%s", (uid,), fetch=True)
     if r is None:
-        c.execute("INSERT INTO users (user_id, wallet, ref_code) VALUES (?, 0, ?)", (uid, gen_ref_code()))
-        conn.commit()
+        db_execute("INSERT INTO users (user_id, wallet, ref_code) VALUES (%s, 0, %s)", (uid, gen_ref_code()))
         return 0
     return r[0]
 
 def add_wallet(uid, delta):
     new = get_wallet(uid) + delta
-    c.execute("INSERT OR REPLACE INTO users (user_id, wallet) VALUES (?, ?)", (uid, new))
-    conn.commit()
+    db_execute("""INSERT INTO users (user_id, wallet) VALUES (%s, %s)
+                  ON CONFLICT (user_id) DO UPDATE SET wallet = EXCLUDED.wallet""", (uid, new))
     return new
 
 def get_user(uid):
-    c.execute("SELECT user_id, wallet, ref_code, referred_by, referrals_count, total_reward FROM users WHERE user_id=?", (uid,))
-    return c.fetchone()
+    return db_execute("SELECT user_id, wallet, ref_code, referred_by, referrals_count, total_reward FROM users WHERE user_id=%s", (uid,), fetch=True)
 
 def get_user_by_ref(code):
-    c.execute("SELECT user_id FROM users WHERE ref_code=?", (code,))
-    return c.fetchone()
+    return db_execute("SELECT user_id FROM users WHERE ref_code=%s", (code,), fetch=True)
 
 def user_exists(uid):
-    c.execute("SELECT 1 FROM users WHERE user_id=?", (uid,))
-    return c.fetchone() is not None
+    r = db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True)
+    return r is not None
 
 def get_all_users():
-    c.execute("SELECT user_id FROM users")
-    return [r[0] for r in c.fetchall()]
+    rows = db_execute_all("SELECT user_id FROM users")
+    return [r[0] for r in rows]
 
 def fa_to_en(text):
     return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
 
 def set_state(uid, state, data=""):
-    c.execute("INSERT OR REPLACE INTO states (user_id, state, data) VALUES (?, ?, ?)", (uid, state, data))
-    conn.commit()
+    db_execute("""INSERT INTO states (user_id, state, data) VALUES (%s, %s, %s)
+                  ON CONFLICT (user_id) DO UPDATE SET state = EXCLUDED.state, data = EXCLUDED.data""", (uid, state, data))
 
 def get_state(uid):
-    c.execute("SELECT state, data FROM states WHERE user_id=?", (uid,))
-    r = c.fetchone()
+    r = db_execute("SELECT state, data FROM states WHERE user_id=%s", (uid,), fetch=True)
     if r is None:
         return None, ""
     return r[0], r[1]
 
 def clear_state(uid):
-    c.execute("DELETE FROM states WHERE user_id=?", (uid,))
-    conn.commit()
+    db_execute("DELETE FROM states WHERE user_id=%s", (uid,))
 
 def is_admin(uid):
     return uid == ADMIN_ID
@@ -156,17 +189,15 @@ async def start(update, context):
     is_new = not user_exists(uid)
 
     if is_new:
-        c.execute("INSERT INTO users (user_id, wallet, ref_code) VALUES (?, 0, ?)", (uid, gen_ref_code()))
-        conn.commit()
+        db_execute("INSERT INTO users (user_id, wallet, ref_code) VALUES (%s, 0, %s)", (uid, gen_ref_code()))
         if args:
             ref_code = args[0]
             ref_owner = get_user_by_ref(ref_code)
             if ref_owner:
                 ref_uid = ref_owner[0]
                 if ref_uid != uid:
-                    c.execute("UPDATE users SET referrals_count=referrals_count+1, total_reward=total_reward+? WHERE user_id=?",
+                    db_execute("UPDATE users SET referrals_count=referrals_count+1, total_reward=total_reward+%s WHERE user_id=%s",
                               (REFERRAL_REWARD, ref_uid))
-                    conn.commit()
                     try:
                         await context.bot.send_message(
                             ref_uid,
@@ -277,16 +308,10 @@ async def menu_router(update, context):
         await update.message.reply_text("متن پیام همگانی را وارد کنید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت بالای 100" and is_admin(uid):
         set_state(uid, "ADMIN_SET_PRICE_HIGH")
-        await update.message.reply_text(
-            f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:",
-            reply_markup=cancel_kb()
-        )
+        await update.message.reply_text(f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت پایین 100" and is_admin(uid):
         set_state(uid, "ADMIN_SET_PRICE_LOW")
-        await update.message.reply_text(
-            f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:",
-            reply_markup=cancel_kb()
-        )
+        await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     else:
         await update.message.reply_text("لطفا از دکمه‌های زیر استفاده کنید:", reply_markup=main_kb(uid))
 async def do_withdraw_amount(update, context, uid):
@@ -312,14 +337,11 @@ async def do_withdraw_card(update, context, uid, data):
     amount = int(data)
     user = get_user(uid)
     ref_count = user[4]
-    c.execute("INSERT INTO withdraw_requests (user_id, amount, card) VALUES (?, ?, ?)", (uid, amount, card))
-    conn.commit()
-    req_id = c.lastrowid
+    db_execute("INSERT INTO withdraw_requests (user_id, amount, card) VALUES (%s, %s, %s)", (uid, amount, card))
+    r = db_execute("SELECT id FROM withdraw_requests WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,), fetch=True)
+    req_id = r[0]
     clear_state(uid)
-    await update.message.reply_text(
-        "✅ درخواست شما ثبت شد. به زودی بررسی می‌شود.",
-        reply_markup=main_kb(uid)
-    )
+    await update.message.reply_text("✅ درخواست شما ثبت شد. به زودی بررسی می‌شود.", reply_markup=main_kb(uid))
     admin_text = (
         f"💰 درخواست دریافت جایزه\n\n"
         f"🆔 آیدی: {uid}\n"
@@ -329,9 +351,7 @@ async def do_withdraw_card(update, context, uid, data):
         f"💵 مقدار درخواست: {amount:,} میوپوینت\n"
         f"💳 شماره کارت: {card}"
     )
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ واریز شد", callback_data=f"paid_{req_id}_{uid}")]
-    ])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ واریز شد", callback_data=f"paid_{req_id}_{uid}")]])
     try:
         await context.bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
     except Exception as e:
@@ -497,8 +517,7 @@ async def on_callback(update, context):
         parts = data.replace("paid_", "").split("_")
         req_id = int(parts[0])
         target_uid = int(parts[1])
-        c.execute("SELECT amount FROM withdraw_requests WHERE id=?", (req_id,))
-        r = c.fetchone()
+        r = db_execute("SELECT amount FROM withdraw_requests WHERE id=%s", (req_id,), fetch=True)
         if r:
             amount = r[0]
             try:
@@ -530,9 +549,7 @@ async def do_pay_wallet(query, context, uid):
     card, amount, total = parts[0], float(parts[1]), int(parts[2])
     bal = get_wallet(uid)
     if bal < total:
-        await query.edit_message_text(
-            f"❌ موجودی کافی نمیباشد.\nموجودی: {bal:,}\nمبلغ لازم: {total:,}"
-        )
+        await query.edit_message_text(f"❌ موجودی کافی نمیباشد.\nموجودی: {bal:,}\nمبلغ لازم: {total:,}")
         clear_state(uid)
         return
     new_bal = add_wallet(uid, -total)
@@ -561,8 +578,7 @@ async def do_charge(query, context, data, approve):
         charge_id = int(data.replace("charge_ok_", ""))
     else:
         charge_id = int(data.replace("charge_no_", ""))
-    c.execute("SELECT user_id, amount, status FROM pending_charges WHERE id=?", (charge_id,))
-    row = c.fetchone()
+    row = db_execute("SELECT user_id, amount, status FROM pending_charges WHERE id=%s", (charge_id,), fetch=True)
     if not row:
         await query.answer("یافت نشد.", show_alert=True)
         return
@@ -572,16 +588,14 @@ async def do_charge(query, context, data, approve):
         return
     if approve:
         add_wallet(uid, amount)
-        c.execute("UPDATE pending_charges SET status='approved' WHERE id=?", (charge_id,))
-        conn.commit()
+        db_execute("UPDATE pending_charges SET status='approved' WHERE id=%s", (charge_id,))
         await query.edit_message_caption(f"✅ تایید شد — {amount:,} به کاربر {uid} اضافه شد.")
         try:
             await context.bot.send_message(uid, f"✅ کیف پول شما به مبلغ {amount:,} شارژ شد.", reply_markup=main_kb(uid))
         except Exception as e:
             logging.error(e)
     else:
-        c.execute("UPDATE pending_charges SET status='rejected' WHERE id=?", (charge_id,))
-        conn.commit()
+        db_execute("UPDATE pending_charges SET status='rejected' WHERE id=%s", (charge_id,))
         await query.edit_message_caption(f"❌ رد شد — درخواست شارژ کاربر {uid} رد شد.")
         try:
             await context.bot.send_message(uid, "❌ رسید شما تایید نشد.", reply_markup=main_kb(uid))
@@ -595,9 +609,9 @@ async def on_photo(update, context):
         return
     amount = int(data)
     photo_id = update.message.photo[-1].file_id
-    c.execute("INSERT INTO pending_charges (user_id, amount, photo_id) VALUES (?, ?, ?)", (uid, amount, photo_id))
-    conn.commit()
-    charge_id = c.lastrowid
+    db_execute("INSERT INTO pending_charges (user_id, amount, photo_id) VALUES (%s, %s, %s)", (uid, amount, photo_id))
+    r = db_execute("SELECT id FROM pending_charges WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,), fetch=True)
+    charge_id = r[0]
     clear_state(uid)
     await update.message.reply_text("لطفا منتظر تایید باشید...", reply_markup=main_kb(uid))
     admin_text = (
