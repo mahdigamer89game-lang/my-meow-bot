@@ -16,7 +16,7 @@ from telegram.ext import (
 
 TOKEN = os.environ.get("TOKEN")
 ADMIN_ID = 1713081033
-BOT_USERNAME = "Meowie_buy"
+BOT_USERNAME = "Meowie_buybot"
 CARD_NUMBER = "5047061673513814"
 CARD_NAME = "صادقی"
 REFERRAL_REWARD = 150000
