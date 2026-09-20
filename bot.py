@@ -27,6 +27,11 @@ MIN_WITHDRAW = 500000
 MIN_REFERRALS = 5
 USERS_PER_PAGE = 10
 
+REQUIRED_CHANNELS = [
+    {"id": "@Channle_Meowie_Buy", "link": "https://t.me/Channle_Meowie_Buy"},
+    {"id": "@Meow_Point_Free", "link": "https://t.me/Meow_Point_Free"},
+]
+
 logging.basicConfig(level=logging.INFO)
 
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
@@ -196,6 +201,18 @@ def clear_state(uid):
 def is_admin(uid):
     return uid == ADMIN_ID
 
+async def check_membership(context, uid):
+    not_joined = []
+    for ch in REQUIRED_CHANNELS:
+        try:
+            member = await context.bot.get_chat_member(ch["id"], uid)
+            if member.status in ["left", "kicked"]:
+                not_joined.append(ch)
+        except Exception as e:
+            logging.error(f"Check membership error: {e}")
+            not_joined.append(ch)
+    return not_joined
+
 def main_kb(uid=None):
     rows = [
         [KeyboardButton("🛒 خرید میو پوینت")],
@@ -236,12 +253,28 @@ def user_manage_kb(target_uid):
 
 def cancel_kb():
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 بازگشت")]], resize_keyboard=True)
+
+def join_kb(not_joined):
+    buttons = []
+    for ch in not_joined:
+        buttons.append([InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])])
+    buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
+    return InlineKeyboardMarkup(buttons)
 async def start(update, context):
     uid = update.effective_user.id
     args = context.args
     user = update.effective_user
-    is_new = not user_exists(uid)
 
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        text = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined:
+            text += f"📢 {ch['id']}\n"
+        text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(text, reply_markup=join_kb(not_joined))
+        return
+
+    is_new = not user_exists(uid)
     if is_new:
         db_execute("INSERT INTO users (user_id, wallet, ref_code, full_name, username) VALUES (%s, 0, %s, %s, %s)",
                    (uid, gen_ref_code(), user.full_name, user.username or ""))
@@ -268,13 +301,23 @@ async def start(update, context):
 
     clear_state(uid)
     await update.message.reply_text(
-        "به ربات خوش آمدید! 👋\nلطفا یک گزینه را انتخاب کنید:",
+        "✅ عضویت شما تایید شد. با تشکر!\n\nلطفا یک گزینه را انتخاب کنید:",
         reply_markup=main_kb(uid)
     )
 
 async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
+
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        txt = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined:
+            txt += f"📢 {ch['id']}\n"
+        txt += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
+        return
+
     state, data = get_state(uid)
 
     if state == "ADMIN_REPLY":
@@ -514,6 +557,7 @@ async def do_note_user(update, context, uid, data):
     db_execute("UPDATE users SET notes=%s WHERE user_id=%s", (note, target_uid))
     clear_state(uid)
     await update.message.reply_text(f"✅ یادداشت برای کاربر {target_uid} ذخیره شد.", reply_markup=admin_kb())
+
 async def do_withdraw_amount(update, context, uid):
     text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
     user = get_user(uid)
@@ -674,6 +718,28 @@ async def on_callback(update, context):
     query = update.callback_query
     data = query.data
     uid = query.from_user.id
+
+    if data == "check_join":
+        await query.answer()
+        not_joined = await check_membership(context, uid)
+        if not_joined:
+            text = "⚠️ هنوز عضو کانال‌های زیر نشدی:\n\n"
+            for ch in not_joined:
+                text += f"📢 {ch['id']}\n"
+            text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+            try:
+                await query.edit_message_text(text, reply_markup=join_kb(not_joined))
+            except:
+                await query.message.reply_text(text, reply_markup=join_kb(not_joined))
+            return
+        else:
+            get_wallet(uid)
+            try:
+                await query.edit_message_text("✅ عضویت شما تایید شد. با تشکر!")
+            except:
+                pass
+            await context.bot.send_message(uid, "به منوی اصلی خوش آمدید 👇", reply_markup=main_kb(uid))
+            return
 
     if data.startswith("users_page_"):
         await query.answer()
