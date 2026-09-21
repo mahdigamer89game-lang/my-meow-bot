@@ -33,7 +33,6 @@ REQUIRED_CHANNELS = [
 ]
 
 logging.basicConfig(level=logging.INFO)
-
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
 
 def db_execute(query, params=None, fetch=False):
@@ -41,10 +40,7 @@ def db_execute(query, params=None, fetch=False):
     try:
         c = conn.cursor()
         c.execute(query, params)
-        if fetch:
-            result = c.fetchone()
-        else:
-            result = None
+        result = c.fetchone() if fetch else None
         conn.commit()
         c.close()
         return result
@@ -101,6 +97,10 @@ def init_db():
             id SERIAL PRIMARY KEY,
             user_id BIGINT, amount BIGINT, type TEXT, description TEXT,
             created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_refs (
+            user_id BIGINT PRIMARY KEY,
+            ref_code VARCHAR(20)
         )"""
     ]
     for q in queries:
@@ -235,6 +235,7 @@ def admin_kb():
         [KeyboardButton("📢 پیام همگانی")],
         [KeyboardButton("👥 لیست کاربران")],
         [KeyboardButton("💵 قیمت بالای 100"), KeyboardButton("💵 قیمت پایین 100")],
+        [KeyboardButton("💰 شارژ همه کاربران"), KeyboardButton("🎁 جایزه همه کاربران")],
         [KeyboardButton("🔙 بازگشت")]
     ], resize_keyboard=True)
 
@@ -242,6 +243,7 @@ def user_manage_kb(target_uid):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 شارژ کیف پول", callback_data=f"um_charge_{target_uid}")],
         [InlineKeyboardButton("💸 کسر از کیف پول", callback_data=f"um_deduct_{target_uid}")],
+        [InlineKeyboardButton("👥 افزودن رفرال", callback_data=f"um_ref_{target_uid}")],
         [InlineKeyboardButton("📊 اطلاعات کامل", callback_data=f"um_info_{target_uid}")],
         [InlineKeyboardButton("📢 ارسال پیام", callback_data=f"um_msg_{target_uid}")],
         [InlineKeyboardButton("📜 سفارش‌ها", callback_data=f"um_orders_{target_uid}")],
@@ -260,30 +262,32 @@ def join_kb(not_joined):
         buttons.append([InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])])
     buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
     return InlineKeyboardMarkup(buttons)
-async def start(update, context):
-    uid = update.effective_user.id
-    args = context.args
-    user = update.effective_user
 
-    not_joined = await check_membership(context, uid)
-    if not_joined:
-        text = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-        for ch in not_joined:
-            text += f"📢 {ch['id']}\n"
-        text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
-        await update.message.reply_text(text, reply_markup=join_kb(not_joined))
-        return
-
+async def process_start_logic(update, context, uid, user):
+    """پردازش اصلی استارت (بعد از چک عضویت)"""
     is_new = not user_exists(uid)
+
+    # پردازش رفرال در انتظار (حتی برای کاربرای قدیمی که تازه عضو شدن)
+    pending = db_execute("SELECT ref_code FROM pending_refs WHERE user_id=%s", (uid,), fetch=True)
+
     if is_new:
         db_execute("INSERT INTO users (user_id, wallet, ref_code, full_name, username) VALUES (%s, 0, %s, %s, %s)",
                    (uid, gen_ref_code(), user.full_name, user.username or ""))
-        if args:
-            ref_code = args[0]
-            ref_owner = get_user_by_ref(ref_code)
-            if ref_owner:
-                ref_uid = ref_owner[0]
-                if ref_uid != uid:
+    else:
+        db_execute("UPDATE users SET full_name=%s, username=%s WHERE user_id=%s",
+                   (user.full_name, user.username or "", uid))
+
+    # پردازش رفرال
+    if pending:
+        ref_code = pending[0]
+        ref_owner = get_user_by_ref(ref_code)
+        if ref_owner:
+            ref_uid = ref_owner[0]
+            if ref_uid != uid:
+                # چک کن که این کاربر قبلاً با این رفرال ثبت نشده باشه
+                already = db_execute("SELECT referred_by FROM users WHERE user_id=%s", (uid,), fetch=True)
+                if already and already[0] is None:
+                    db_execute("UPDATE users SET referred_by=%s WHERE user_id=%s", (ref_uid, uid))
                     db_execute("UPDATE users SET referrals_count=referrals_count+1, total_reward=total_reward+%s WHERE user_id=%s",
                               (REFERRAL_REWARD, ref_uid))
                     add_transaction(ref_uid, REFERRAL_REWARD, "referral", f"دعوت کاربر {user.full_name}")
@@ -295,16 +299,36 @@ async def start(update, context):
                         )
                     except Exception as e:
                         logging.error(e)
-    else:
-        db_execute("UPDATE users SET full_name=%s, username=%s WHERE user_id=%s",
-                   (user.full_name, user.username or "", uid))
+        db_execute("DELETE FROM pending_refs WHERE user_id=%s", (uid,))
 
     clear_state(uid)
-    await update.message.reply_text(
+    await context.bot.send_message(
+        uid,
         "✅ عضویت شما تایید شد. با تشکر!\n\nلطفا یک گزینه را انتخاب کنید:",
         reply_markup=main_kb(uid)
     )
 
+async def start(update, context):
+    uid = update.effective_user.id
+    args = context.args
+    user = update.effective_user
+
+    # اگه کاربر جدید با لینک رفرال اومده، کد رو موقت ذخیره کن
+    if args and not user_exists(uid):
+        ref_code = args[0]
+        db_execute("""INSERT INTO pending_refs (user_id, ref_code) VALUES (%s, %s)
+                      ON CONFLICT (user_id) DO UPDATE SET ref_code = EXCLUDED.ref_code""", (uid, ref_code))
+
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        text = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined:
+            text += f"📢 {ch['id']}\n"
+        text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(text, reply_markup=join_kb(not_joined))
+        return
+
+    await process_start_logic(update, context, uid, user)
 async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
@@ -352,6 +376,12 @@ async def menu_router(update, context):
         return await do_bonus_user(update, context, uid, data)
     if state == "ADMIN_NOTE_USER":
         return await do_note_user(update, context, uid, data)
+    if state == "ADMIN_REF_USER":
+        return await do_add_ref_user(update, context, uid, data)
+    if state == "ADMIN_CHARGE_ALL":
+        return await do_charge_all(update, context, uid)
+    if state == "ADMIN_BONUS_ALL":
+        return await do_bonus_all(update, context, uid)
 
     if text == "🛒 خرید میو پوینت":
         kb = InlineKeyboardMarkup([
@@ -408,6 +438,12 @@ async def menu_router(update, context):
         await update.message.reply_text("🔐 پنل ادمین\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=admin_kb())
     elif text == "👥 لیست کاربران" and is_admin(uid):
         await show_users_page(update, context, 0)
+    elif text == "💰 شارژ همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_CHARGE_ALL")
+        await update.message.reply_text("💰 مقدار شارژ برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
+    elif text == "🎁 جایزه همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_BONUS_ALL")
+        await update.message.reply_text("🎁 مقدار جایزه رفرال برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
     elif text == "💳 شارژ کیف پول":
         set_state(uid, "WALLET_AMOUNT")
         await update.message.reply_text(
@@ -438,9 +474,12 @@ async def show_users_page(update, context, page):
     text = f"👥 لیست کاربران ({total} کاربر)\nصفحه {page+1} از {total_pages}\n\n"
     buttons = []
     for u in users:
-        uid, full_name, username, wallet = u
-        name = full_name or "بدون نام"
-        buttons.append([InlineKeyboardButton(f"{name} - {wallet:,}", callback_data=f"um_view_{uid}")])
+        uid_u, full_name, username, wallet = u
+        if full_name and full_name.strip():
+            name = full_name
+        else:
+            name = f"کاربر {uid_u}"
+        buttons.append([InlineKeyboardButton(f"{name} - {wallet:,}", callback_data=f"um_view_{uid_u}")])
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"users_page_{page-1}"))
@@ -470,7 +509,7 @@ async def do_search_user(update, context, uid):
     buttons = []
     for u in results:
         uid_u, full_name, username, wallet = u
-        name = full_name or "بدون نام"
+        name = full_name if full_name and full_name.strip() else f"کاربر {uid_u}"
         buttons.append([InlineKeyboardButton(f"{name} - {wallet:,}", callback_data=f"um_view_{uid_u}")])
     kb = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(text, reply_markup=kb)
@@ -504,7 +543,7 @@ async def do_charge_user(update, context, uid, data):
         return
     new_bal = add_wallet(target_uid, amount, f"شارژ دستی توسط ادمین")
     clear_state(uid)
-    await update.message.reply_text(f"✅ {amount:,} میوپوینت به کاربر {target_uid} اضافه شد.\nموجودی جدید: {new_bal:,}", reply_markup=admin_kb())
+    await update.message.reply_text(f"✅ {amount:,} به کاربر {target_uid} اضافه شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
     try:
         await context.bot.send_message(target_uid, f"🎁 {amount:,} میوپوینت به کیف پول شما اضافه شد!\nموجودی جدید: {new_bal:,}", reply_markup=main_kb(target_uid))
     except Exception:
@@ -524,9 +563,9 @@ async def do_deduct_user(update, context, uid, data):
         return
     new_bal = add_wallet(target_uid, -amount, f"کسر دستی توسط ادمین")
     clear_state(uid)
-    await update.message.reply_text(f"✅ {amount:,} میوپوینت از کاربر {target_uid} کسر شد.\nموجودی جدید: {new_bal:,}", reply_markup=admin_kb())
+    await update.message.reply_text(f"✅ {amount:,} از کاربر {target_uid} کسر شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
     try:
-        await context.bot.send_message(target_uid, f"⚠️ {amount:,} میوپوینت از کیف پول شما کسر شد.\nموجودی جدید: {new_bal:,}", reply_markup=main_kb(target_uid))
+        await context.bot.send_message(target_uid, f"⚠️ {amount:,} میوپوینت از کیف پول شما کسر شد.\nموجودی: {new_bal:,}", reply_markup=main_kb(target_uid))
     except Exception:
         pass
 
@@ -545,7 +584,23 @@ async def do_bonus_user(update, context, uid, data):
     db_execute("UPDATE users SET total_reward = total_reward + %s WHERE user_id=%s", (amount, target_uid))
     add_transaction(target_uid, amount, "bonus", "جایزه دستی از ادمین")
     clear_state(uid)
-    await update.message.reply_text(f"✅ {amount:,} میوپوینت به جایزه‌های دعوت کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
+    await update.message.reply_text(f"✅ {amount:,} به جایزه‌های کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
+
+async def do_add_ref_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        count = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if count <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    db_execute("UPDATE users SET referrals_count = referrals_count + %s WHERE user_id=%s", (count, target_uid))
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {count} رفرال به کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
 
 async def do_note_user(update, context, uid, data):
     target_uid = int(data)
@@ -556,8 +611,63 @@ async def do_note_user(update, context, uid, data):
     note = update.message.text
     db_execute("UPDATE users SET notes=%s WHERE user_id=%s", (note, target_uid))
     clear_state(uid)
-    await update.message.reply_text(f"✅ یادداشت برای کاربر {target_uid} ذخیره شد.", reply_markup=admin_kb())
+    await update.message.reply_text(f"✅ یادداشت ذخیره شد.", reply_markup=admin_kb())
 
+async def do_charge_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال شارژ {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET wallet = wallet + %s WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, amount, "add", "شارژ همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Charge all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(
+        f"✅ {amount:,} میوپوینت به {success} کاربر اضافه شد.",
+        reply_markup=admin_kb()
+    )
+
+async def do_bonus_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال افزودن جایزه به {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET total_reward = total_reward + %s WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, amount, "bonus", "جایزه همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Bonus all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(
+        f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.",
+        reply_markup=admin_kb()
+    )
 async def do_withdraw_amount(update, context, uid):
     text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
     user = get_user(uid)
@@ -733,12 +843,11 @@ async def on_callback(update, context):
                 await query.message.reply_text(text, reply_markup=join_kb(not_joined))
             return
         else:
-            get_wallet(uid)
+            await process_start_logic(update, context, uid, query.from_user)
             try:
                 await query.edit_message_text("✅ عضویت شما تایید شد. با تشکر!")
             except:
                 pass
-            await context.bot.send_message(uid, "به منوی اصلی خوش آمدید 👇", reply_markup=main_kb(uid))
             return
 
     if data.startswith("users_page_"):
@@ -760,10 +869,11 @@ async def on_callback(update, context):
             await query.message.reply_text("❌ کاربر پیدا نشد.")
             return
         uid_u, wallet, ref_code, referred_by, ref_count, total_reward, full_name, username, joined_at, notes = user
+        name_display = full_name if full_name and full_name.strip() else f"کاربر {uid_u}"
         text = (
             f"👤 اطلاعات کاربر\n\n"
             f"🆔 آیدی: {uid_u}\n"
-            f"👤 نام: {full_name or 'بدون نام'}\n"
+            f"👤 نام: {name_display}\n"
             f"🔗 یوزرنیم: @{username if username else 'ندارد'}\n"
             f"💰 موجودی: {wallet:,} میوپوینت\n"
             f"🎁 جایزه دعوت: {total_reward:,}\n"
@@ -777,13 +887,19 @@ async def on_callback(update, context):
         if not is_admin(uid): return
         target_uid = int(data.replace("um_charge_", ""))
         set_state(uid, "ADMIN_CHARGE_USER", str(target_uid))
-        await query.message.reply_text(f"💰 مقدار شارژ برای کاربر {target_uid} رو وارد کن:", reply_markup=cancel_kb())
+        await query.message.reply_text(f"💰 مقدار شارژ برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_deduct_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_deduct_", ""))
         set_state(uid, "ADMIN_DEDUCT_USER", str(target_uid))
-        await query.message.reply_text(f"💸 مقدار کسر از کاربر {target_uid} رو وارد کن:", reply_markup=cancel_kb())
+        await query.message.reply_text(f"💸 مقدار کسر از کاربر {target_uid}:", reply_markup=cancel_kb())
+    elif data.startswith("um_ref_"):
+        await query.answer()
+        if not is_admin(uid): return
+        target_uid = int(data.replace("um_ref_", ""))
+        set_state(uid, "ADMIN_REF_USER", str(target_uid))
+        await query.message.reply_text(f"👥 تعداد رفرال برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_msg_"):
         await query.answer()
         if not is_admin(uid): return
@@ -812,7 +928,7 @@ async def on_callback(update, context):
         await query.message.reply_text(
             f"📊 اطلاعات کامل کاربر\n\n"
             f"🆔 آیدی: {uid_u}\n"
-            f"👤 نام: {full_name}\n"
+            f"👤 نام: {full_name or 'ندارد'}\n"
             f"🔗 یوزرنیم: @{username if username else 'ندارد'}\n"
             f"💰 موجودی: {wallet:,}\n"
             f"🎁 جایزه دعوت: {total_reward:,}\n"
@@ -853,6 +969,7 @@ async def on_callback(update, context):
         db_execute("DELETE FROM users WHERE user_id=%s", (target_uid,))
         db_execute("DELETE FROM states WHERE user_id=%s", (target_uid,))
         db_execute("DELETE FROM transactions WHERE user_id=%s", (target_uid,))
+        db_execute("DELETE FROM pending_refs WHERE user_id=%s", (target_uid,))
         await query.message.reply_text(f"🗑 کاربر {target_uid} حذف شد.")
     elif data == "cat_high":
         await query.answer()
@@ -1003,7 +1120,6 @@ async def on_photo(update, context):
         await context.bot.send_photo(ADMIN_ID, photo=photo_id, caption=admin_text, reply_markup=kb)
     except Exception as e:
         logging.error(e)
-
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
