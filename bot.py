@@ -236,6 +236,7 @@ def admin_kb():
         [KeyboardButton("👥 لیست کاربران")],
         [KeyboardButton("💵 قیمت بالای 100"), KeyboardButton("💵 قیمت پایین 100")],
         [KeyboardButton("💰 شارژ همه کاربران"), KeyboardButton("🎁 جایزه همه کاربران")],
+        [KeyboardButton("💸 کسر جایزه از همه کاربران")],
         [KeyboardButton("🔙 بازگشت")]
     ], resize_keyboard=True)
 
@@ -264,10 +265,7 @@ def join_kb(not_joined):
     return InlineKeyboardMarkup(buttons)
 
 async def process_start_logic(update, context, uid, user):
-    """پردازش اصلی استارت (بعد از چک عضویت)"""
     is_new = not user_exists(uid)
-
-    # پردازش رفرال در انتظار (حتی برای کاربرای قدیمی که تازه عضو شدن)
     pending = db_execute("SELECT ref_code FROM pending_refs WHERE user_id=%s", (uid,), fetch=True)
 
     if is_new:
@@ -277,14 +275,12 @@ async def process_start_logic(update, context, uid, user):
         db_execute("UPDATE users SET full_name=%s, username=%s WHERE user_id=%s",
                    (user.full_name, user.username or "", uid))
 
-    # پردازش رفرال
     if pending:
         ref_code = pending[0]
         ref_owner = get_user_by_ref(ref_code)
         if ref_owner:
             ref_uid = ref_owner[0]
             if ref_uid != uid:
-                # چک کن که این کاربر قبلاً با این رفرال ثبت نشده باشه
                 already = db_execute("SELECT referred_by FROM users WHERE user_id=%s", (uid,), fetch=True)
                 if already and already[0] is None:
                     db_execute("UPDATE users SET referred_by=%s WHERE user_id=%s", (ref_uid, uid))
@@ -313,7 +309,6 @@ async def start(update, context):
     args = context.args
     user = update.effective_user
 
-    # اگه کاربر جدید با لینک رفرال اومده، کد رو موقت ذخیره کن
     if args and not user_exists(uid):
         ref_code = args[0]
         db_execute("""INSERT INTO pending_refs (user_id, ref_code) VALUES (%s, %s)
@@ -382,6 +377,8 @@ async def menu_router(update, context):
         return await do_charge_all(update, context, uid)
     if state == "ADMIN_BONUS_ALL":
         return await do_bonus_all(update, context, uid)
+    if state == "ADMIN_DEDUCT_BONUS_ALL":
+        return await do_deduct_bonus_all(update, context, uid)
 
     if text == "🛒 خرید میو پوینت":
         kb = InlineKeyboardMarkup([
@@ -444,6 +441,9 @@ async def menu_router(update, context):
     elif text == "🎁 جایزه همه کاربران" and is_admin(uid):
         set_state(uid, "ADMIN_BONUS_ALL")
         await update.message.reply_text("🎁 مقدار جایزه رفرال برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
+    elif text == "💸 کسر جایزه از همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_DEDUCT_BONUS_ALL")
+        await update.message.reply_text("💸 مقدار کسر جایزه برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
     elif text == "💳 شارژ کیف پول":
         set_state(uid, "WALLET_AMOUNT")
         await update.message.reply_text(
@@ -666,6 +666,34 @@ async def do_bonus_all(update, context, uid):
     clear_state(uid)
     await update.message.reply_text(
         f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.",
+        reply_markup=admin_kb()
+    )
+
+async def do_deduct_bonus_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال کسر جایزه از {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, -amount, "sub", "کسر جایزه همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Deduct bonus all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(
+        f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.",
         reply_markup=admin_kb()
     )
 async def do_withdraw_amount(update, context, uid):
