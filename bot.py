@@ -218,7 +218,7 @@ def main_kb(uid=None):
         [KeyboardButton("🛒 خرید میو پوینت")],
         [KeyboardButton("💰 کیف پول"), KeyboardButton("📞 پشتیبانی")],
         [KeyboardButton("👥 دعوت دوستان"), KeyboardButton("🤝 چطور اعتماد کنم")],
-        [KeyboardButton("📖 راهنما")],
+        [KeyboardButton("📊 موجودی ما چقدره"), KeyboardButton("📖 راهنما")],
     ]
     if uid and is_admin(uid):
         rows.append([KeyboardButton("🔐 پنل ادمین")])
@@ -420,6 +420,13 @@ async def menu_router(update, context):
             "https://t.me/Meow_Point_Free\n\n"
             "برای دیدن رضایت‌ها در چنل سرچ کنید #رضایت\n"
             "و اگر سوالی داشتید در پی وی بگید @Goooorba1234",
+            reply_markup=main_kb(uid)
+        )
+    elif text == "📊 موجودی ما چقدره":
+        await update.message.reply_text(
+            "📊 موجودی ما چقدره؟\n\n"
+            "موجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\n"
+            "اما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.",
             reply_markup=main_kb(uid)
         )
     elif text == "📖 راهنما":
@@ -636,10 +643,7 @@ async def do_charge_all(update, context, uid):
         except Exception as e:
             logging.error(f"Charge all error for {u}: {e}")
     clear_state(uid)
-    await update.message.reply_text(
-        f"✅ {amount:,} میوپوینت به {success} کاربر اضافه شد.",
-        reply_markup=admin_kb()
-    )
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت به {success} کاربر اضافه شد.", reply_markup=admin_kb())
 
 async def do_bonus_all(update, context, uid):
     if update.message.text == "🔙 بازگشت":
@@ -664,10 +668,7 @@ async def do_bonus_all(update, context, uid):
         except Exception as e:
             logging.error(f"Bonus all error for {u}: {e}")
     clear_state(uid)
-    await update.message.reply_text(
-        f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.",
-        reply_markup=admin_kb()
-    )
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.", reply_markup=admin_kb())
 
 async def do_deduct_bonus_all(update, context, uid):
     if update.message.text == "🔙 بازگشت":
@@ -692,10 +693,377 @@ async def do_deduct_bonus_all(update, context, uid):
         except Exception as e:
             logging.error(f"Deduct bonus all error for {u}: {e}")
     clear_state(uid)
-    await update.message.reply_text(
-        f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.",
-        reply_markup=admin_kb()
-    )
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.", reply_markup=admin_kb())
+async def menu_router(update, context):
+    text = update.message.text
+    uid = update.effective_user.id
+
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        txt = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined:
+            txt += f"📢 {ch['id']}\n"
+        txt += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
+        return
+
+    state, data = get_state(uid)
+
+    if state == "ADMIN_REPLY":
+        return await do_send_reply(update, context, uid, data)
+    if state == "WALLET_AMOUNT":
+        return await do_wallet_amount(update, context, uid)
+    if state == "ADMIN_BROADCAST":
+        return await do_broadcast(update, context, uid)
+    if state == "ADMIN_SET_PRICE_HIGH":
+        return await do_set_price(update, context, uid, "price_high")
+    if state == "ADMIN_SET_PRICE_LOW":
+        return await do_set_price(update, context, uid, "price_low")
+    if state == "SUPPORT_MESSAGE":
+        return await do_support_message(update, context, uid)
+    if state == "BUY_AMOUNT":
+        return await do_buy_amount(update, context, uid, data)
+    if state == "BUY_CARD":
+        return await do_buy_card(update, context, uid, data)
+    if state == "WITHDRAW_AMOUNT":
+        return await do_withdraw_amount(update, context, uid)
+    if state == "WITHDRAW_CARD":
+        return await do_withdraw_card(update, context, uid, data)
+    if state == "ADMIN_SEARCH":
+        return await do_search_user(update, context, uid)
+    if state == "ADMIN_MSG_USER":
+        return await do_msg_user(update, context, uid, data)
+    if state == "ADMIN_CHARGE_USER":
+        return await do_charge_user(update, context, uid, data)
+    if state == "ADMIN_DEDUCT_USER":
+        return await do_deduct_user(update, context, uid, data)
+    if state == "ADMIN_BONUS_USER":
+        return await do_bonus_user(update, context, uid, data)
+    if state == "ADMIN_NOTE_USER":
+        return await do_note_user(update, context, uid, data)
+    if state == "ADMIN_REF_USER":
+        return await do_add_ref_user(update, context, uid, data)
+    if state == "ADMIN_CHARGE_ALL":
+        return await do_charge_all(update, context, uid)
+    if state == "ADMIN_BONUS_ALL":
+        return await do_bonus_all(update, context, uid)
+    if state == "ADMIN_DEDUCT_BONUS_ALL":
+        return await do_deduct_bonus_all(update, context, uid)
+
+    if text == "🛒 خرید میو پوینت":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("بالای 100 میلیون", callback_data="cat_high")],
+            [InlineKeyboardButton("پایین 100 میلیون", callback_data="cat_low")]
+        ])
+        await update.message.reply_text("لطفا یک دسته را انتخاب کنید:", reply_markup=kb)
+    elif text == "💰 کیف پول":
+        bal = get_wallet(uid)
+        await update.message.reply_text(f"💰 موجودی کیف پول شما: {bal:,} میوپوینت", reply_markup=wallet_kb())
+    elif text == "📞 پشتیبانی":
+        set_state(uid, "SUPPORT_MESSAGE")
+        await update.message.reply_text("شما در حال تیکت به پشتیبانی هستید\nپیام خود را ارسال کنید:", reply_markup=cancel_kb())
+    elif text == "👥 دعوت دوستان":
+        get_wallet(uid)
+        user = get_user(uid)
+        ref_code = user[2]
+        ref_count = user[4]
+        total_reward = user[5]
+        link = f"https://t.me/{BOT_USERNAME}?start={ref_code}"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 دریافت جایزه", callback_data="withdraw")]
+        ])
+        await update.message.reply_text(
+            f"👥 دعوت دوستان\n\n"
+            f"🔗 کد اختصاصی شما:\n`{link}`\n\n"
+            f"📊 تعداد دعوت‌ها: {ref_count}\n"
+            f"🎁 جایزه هر دعوت: {REFERRAL_REWARD:,} میوپوینت\n"
+            f"💰 مجموع جایزه‌ها: {total_reward:,} میوپوینت\n"
+            f"⚠️ حداقل دریافت: {MIN_WITHDRAW:,} میوپوینت\n"
+            f"⚠️ حداقل دعوت: {MIN_REFERRALS}\n\n"
+            f"برای دریافت جایزه از دکمه زیر استفاده کنید:",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    elif text == "🤝 چطور اعتماد کنم":
+        await update.message.reply_text(
+            "ما یک چنل داریم که در آن رضایت‌ها گذاشته می‌شوند\n"
+            "https://t.me/Meow_Point_Free\n\n"
+            "برای دیدن رضایت‌ها در چنل سرچ کنید #رضایت\n"
+            "و اگر سوالی داشتید در پی وی بگید @Goooorba1234",
+            reply_markup=main_kb(uid)
+        )
+    elif text == "📊 موجودی ما چقدره":
+        await update.message.reply_text(
+            "📊 موجودی ما چقدره؟\n\n"
+            "موجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\n"
+            "اما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.",
+            reply_markup=main_kb(uid)
+        )
+    elif text == "📖 راهنما":
+        await update.message.reply_text(
+            "راهنمای خرید میوپوینت\n\n"
+            "اول باید کیف پول را شارژ کنید\n"
+            "وارد بخش کیف پول شوید و آن را شارژ کنید\n"
+            "بعد از شارژ کردن به بخش خرید میو پوینت بروید\n\n"
+            "اگر سوالی داشتید پی وی بگید @Goooorba1234",
+            reply_markup=main_kb(uid)
+        )
+    elif text == "🔐 پنل ادمین" and is_admin(uid):
+        await update.message.reply_text("🔐 پنل ادمین\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=admin_kb())
+    elif text == "👥 لیست کاربران" and is_admin(uid):
+        await show_users_page(update, context, 0)
+    elif text == "💰 شارژ همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_CHARGE_ALL")
+        await update.message.reply_text("💰 مقدار شارژ برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
+    elif text == "🎁 جایزه همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_BONUS_ALL")
+        await update.message.reply_text("🎁 مقدار جایزه رفرال برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
+    elif text == "💸 کسر جایزه از همه کاربران" and is_admin(uid):
+        set_state(uid, "ADMIN_DEDUCT_BONUS_ALL")
+        await update.message.reply_text("💸 مقدار کسر جایزه برای همه کاربران رو وارد کن:", reply_markup=cancel_kb())
+    elif text == "💳 شارژ کیف پول":
+        set_state(uid, "WALLET_AMOUNT")
+        await update.message.reply_text(
+            f"شما در حال کارت به کارت هستید\n"
+            f"شماره کارت: {CARD_NUMBER}\n"
+            f"بنام {CARD_NAME}\n\n"
+            f"لطفا مبلغ پرداخت را وارد کنید:"
+        )
+    elif text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("به منوی اصلی بازگشتید 👇", reply_markup=main_kb(uid))
+    elif text == "📢 پیام همگانی" and is_admin(uid):
+        set_state(uid, "ADMIN_BROADCAST")
+        await update.message.reply_text("متن پیام همگانی را وارد کنید:", reply_markup=cancel_kb())
+    elif text == "💵 قیمت بالای 100" and is_admin(uid):
+        set_state(uid, "ADMIN_SET_PRICE_HIGH")
+        await update.message.reply_text(f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
+    elif text == "💵 قیمت پایین 100" and is_admin(uid):
+        set_state(uid, "ADMIN_SET_PRICE_LOW")
+        await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
+    else:
+        await update.message.reply_text("لطفا از دکمه‌های زیر استفاده کنید:", reply_markup=main_kb(uid))
+
+async def show_users_page(update, context, page):
+    total = get_users_count()
+    users = get_users_page(page)
+    total_pages = max(1, (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
+    text = f"👥 لیست کاربران ({total} کاربر)\nصفحه {page+1} از {total_pages}\n\n"
+    buttons = []
+    for u in users:
+        uid_u, full_name, username, wallet = u
+        if full_name and full_name.strip():
+            name = full_name
+        else:
+            name = f"کاربر {uid_u}"
+        buttons.append([InlineKeyboardButton(f"{name} - {wallet:,}", callback_data=f"um_view_{uid_u}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"users_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("بعدی ➡️", callback_data=f"users_page_{page+1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton("🔍 سرچ", callback_data="users_search")])
+    kb = InlineKeyboardMarkup(buttons)
+    if update.message:
+        await update.message.reply_text(text, reply_markup=kb)
+    else:
+        await update.callback_query.edit_message_text(text, reply_markup=kb)
+
+async def do_search_user(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    query = update.message.text.strip()
+    results = search_users(query)
+    clear_state(uid)
+    if not results:
+        await update.message.reply_text("❌ کاربری پیدا نشد.", reply_markup=admin_kb())
+        return
+    text = f"🔍 نتایج سرچ ({len(results)} کاربر):\n\n"
+    buttons = []
+    for u in results:
+        uid_u, full_name, username, wallet = u
+        name = full_name if full_name and full_name.strip() else f"کاربر {uid_u}"
+        buttons.append([InlineKeyboardButton(f"{name} - {wallet:,}", callback_data=f"um_view_{uid_u}")])
+    kb = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(text, reply_markup=kb)
+    await update.message.reply_text("برای بازگشت:", reply_markup=admin_kb())
+
+async def do_msg_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    text = update.message.text
+    try:
+        await context.bot.send_message(target_uid, f"📢 پیام از ادمین:\n\n{text}", reply_markup=main_kb(target_uid))
+        await update.message.reply_text(f"✅ پیام به کاربر {target_uid} ارسال شد.", reply_markup=admin_kb())
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا: {e}", reply_markup=admin_kb())
+    clear_state(uid)
+
+async def do_charge_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    new_bal = add_wallet(target_uid, amount, f"شارژ دستی توسط ادمین")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} به کاربر {target_uid} اضافه شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
+    try:
+        await context.bot.send_message(target_uid, f"🎁 {amount:,} میوپوینت به کیف پول شما اضافه شد!\nموجودی جدید: {new_bal:,}", reply_markup=main_kb(target_uid))
+    except Exception:
+        pass
+
+async def do_deduct_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    new_bal = add_wallet(target_uid, -amount, f"کسر دستی توسط ادمین")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} از کاربر {target_uid} کسر شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
+    try:
+        await context.bot.send_message(target_uid, f"⚠️ {amount:,} میوپوینت از کیف پول شما کسر شد.\nموجودی: {new_bal:,}", reply_markup=main_kb(target_uid))
+    except Exception:
+        pass
+
+async def do_bonus_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    db_execute("UPDATE users SET total_reward = total_reward + %s WHERE user_id=%s", (amount, target_uid))
+    add_transaction(target_uid, amount, "bonus", "جایزه دستی از ادمین")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} به جایزه‌های کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
+
+async def do_add_ref_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        count = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if count <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    db_execute("UPDATE users SET referrals_count = referrals_count + %s WHERE user_id=%s", (count, target_uid))
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {count} رفرال به کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
+
+async def do_note_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    note = update.message.text
+    db_execute("UPDATE users SET notes=%s WHERE user_id=%s", (note, target_uid))
+    clear_state(uid)
+    await update.message.reply_text(f"✅ یادداشت ذخیره شد.", reply_markup=admin_kb())
+
+async def do_charge_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال شارژ {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET wallet = wallet + %s WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, amount, "add", "شارژ همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Charge all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت به {success} کاربر اضافه شد.", reply_markup=admin_kb())
+
+async def do_bonus_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال افزودن جایزه به {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET total_reward = total_reward + %s WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, amount, "bonus", "جایزه همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Bonus all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.", reply_markup=admin_kb())
+
+async def do_deduct_bonus_all(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+        return
+    try:
+        amount = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if amount <= 0: raise ValueError
+    except:
+        await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+        return
+    users = get_all_users()
+    await update.message.reply_text(f"⏳ در حال کسر جایزه از {len(users)} کاربر...")
+    success = 0
+    for u in users:
+        try:
+            db_execute("UPDATE users SET total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s", (amount, u))
+            db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+                       (u, -amount, "sub", "کسر جایزه همگانی از ادمین"))
+            success += 1
+        except Exception as e:
+            logging.error(f"Deduct bonus all error for {u}: {e}")
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.", reply_markup=admin_kb())
 async def do_withdraw_amount(update, context, uid):
     text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
     user = get_user(uid)
@@ -719,6 +1087,11 @@ async def do_withdraw_card(update, context, uid, data):
     amount = int(data)
     user = get_user(uid)
     ref_count = user[4]
+    # کسر ۵ رفرال و مقدار جایزه درخواستی
+    db_execute("UPDATE users SET referrals_count = GREATEST(referrals_count - %s, 0), total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s",
+               (MIN_REFERRALS, amount, uid))
+    db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)",
+               (uid, -amount, "sub", "دریافت جایزه دعوت"))
     db_execute("INSERT INTO withdraw_requests (user_id, amount, card) VALUES (%s, %s, %s)", (uid, amount, card))
     r = db_execute("SELECT id FROM withdraw_requests WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,), fetch=True)
     req_id = r[0]
@@ -729,7 +1102,7 @@ async def do_withdraw_card(update, context, uid, data):
         f"🆔 آیدی: {uid}\n"
         f"👤 نام: {update.effective_user.full_name}\n"
         f"🔗 یوزرنیم: @{update.effective_user.username if update.effective_user.username else 'ندارد'}\n"
-        f"👥 تعداد دعوت: {ref_count}\n"
+        f"👥 تعداد دعوت قبل: {ref_count}\n"
         f"💵 مقدار: {amount:,} میوپوینت\n"
         f"💳 کارت: {card}"
     )
