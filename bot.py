@@ -126,7 +126,7 @@ async def check_membership(context, uid):
             not_joined.append(ch)
     return not_joined
     def main_kb():
-    return ReplyKeyboardMarkup([
+        return ReplyKeyboardMarkup([
         [KeyboardButton("🔌 فعال‌سازی سلف")],
         [KeyboardButton("⚙️ سلف"), KeyboardButton("💎 خرید الماس")],
         [KeyboardButton("🎁 الماس رایگان")]
