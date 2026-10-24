@@ -33,11 +33,7 @@ REQUIRED_CHANNELS = [
 
 logging.basicConfig(level=logging.INFO)
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
-
-# دیکشنری برای نگه داشتن موقت کلاینت‌های در حال لاگین در حافظه
-login_clients = {}
-
-def db_execute(query, params=None, fetch=False):
+login_clients = {}def db_execute(query, params=None, fetch=False):
     conn = connection_pool.getconn()
     try:
         c = conn.cursor()
@@ -76,7 +72,6 @@ def init_db():
             cat_status BOOLEAN DEFAULT FALSE,
             fish_status BOOLEAN DEFAULT FALSE
         )""",
-        # بقیه کوئری‌های Alter Table...
         """ALTER TABLE users ADD COLUMN IF NOT EXISTS diamonds BIGINT DEFAULT 10""",
         """ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id TEXT""",
         """ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT""",
@@ -101,9 +96,7 @@ def init_db():
         except Exception as e:
             logging.error(f"Init DB error: {e}")
 
-init_db()
-
-def gen_ref_code():
+init_db()def gen_ref_code():
     while True:
         code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         r = db_execute("SELECT 1 FROM users WHERE ref_code=%s", (code,), fetch=True)
@@ -136,9 +129,7 @@ async def check_membership(context, uid):
                 not_joined.append(ch)
         except Exception:
             not_joined.append(ch)
-    return not_joined
-
-def main_kb():
+    return not_joineddef main_kb():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔌 فعال‌سازی سلف")],
         [KeyboardButton("⚙️ سلف"), KeyboardButton("💎 خرید الماس")],
@@ -163,7 +154,6 @@ def join_kb(not_joined):
     return InlineKeyboardMarkup(buttons)async def process_start_logic(update, context, uid, user):
     if not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
         db_execute("INSERT INTO users (user_id, ref_code, full_name) VALUES (%s, %s, %s)", (uid, gen_ref_code(), user.full_name))
-    
     clear_state(uid)
     diamonds = db_execute("SELECT diamonds FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
     await context.bot.send_message(uid, f"به ربات خوش آمدید! 👋\n💎 موجودی الماس شما: {diamonds}\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=main_kb())
@@ -176,61 +166,9 @@ async def start(update, context):
         return
     await process_start_logic(update, context, uid, update.effective_user)
 
-async def menu_router(update, context):
-    text = update.message.text
-    uid = update.effective_user.id
-
-    not_joined = await check_membership(context, uid)
-    if not_joined:
-        await update.message.reply_text("⚠️ ابتدا در کانال‌ها عضو شوید:", reply_markup=join_kb(not_joined))
-        return
-
-    state, data = get_state(uid)
-    
-    if state == "WAIT_GROUP_ID": return await do_set_group(update, context, uid)
-    if state == "WAIT_PHONE": return await do_get_phone(update, context, uid)
-    if state == "WAIT_OTP": return await do_get_otp(update, context, uid)
-    if state == "WAIT_MINER_TOKEN": return await do_set_miner_token(update, context, uid)
-    if state == "WAIT_FACTORY_PRODUCT": return await do_set_factory_product(update, context, uid)
-
-    if text == "🔌 فعال‌سازی سلف":
-        set_state(uid, "WAIT_PHONE")
-        await update.message.reply_text("لطفا شماره تلفن خود را با کد کشور وارد کنید (مثلاً +989123456789):", reply_markup=cancel_kb())
-    elif text == "⚙️ سلف":
-        await update.message.reply_text("به تنظیمات سلف خوش آمدید. یک گزینه را انتخاب کنید:", reply_markup=self_menu_kb())
-    elif text == "💎 خرید الماس":
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("💵 خرید با میو", callback_data="buy_mio")], [InlineKeyboardButton("💳 خرید با پول", callback_data="buy_money")]])
-        await update.message.reply_text("روش خرید را انتخاب کنید:", reply_markup=kb)
-    elif text == "🎁 الماس رایگان":
-        ref_code = db_execute("SELECT ref_code FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
-        link = f"https://t.me/{context.bot.username}?start={ref_code}"
-        await update.message.reply_text(f"🎁 لینک رفرال شما:\n`{link}`\n\nبا هر نفر 50 الماس بگیرید.", parse_mode="Markdown")
-    elif text == "🔙 بازگشت":
-        clear_state(uid)
-        await update.message.reply_text("به منوی اصلی بازگشتید 👇", reply_markup=main_kb())
-    # (بقیه کدهای منوی تنظیمات سلف مثل قبل...)
-    elif text == "🌐 تنظیم گپ":
-        set_state(uid, "WAIT_GROUP_ID")
-        await update.message.reply_text("لطفا آیدی عددی یا لینک گپ مورد نظر را ارسال کنید:", reply_markup=cancel_kb())
-    elif text == "⛏ ماینر":
-        status = db_execute("SELECT miner_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_miner_{'0' if status else '1'}")], [InlineKeyboardButton("⚙️ انتخاب توکن", callback_data="select_miner_token")]])
-        await update.message.reply_text(f"وضعیت ماینر: {'روشن' if status else 'خاموش'}", reply_markup=kb)
-    elif text == "🏭 کارخونه":
-        status = db_execute("SELECT factory_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
-        wh = db_execute("SELECT warehouse_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_factory_{'0' if status else '1'}")],[InlineKeyboardButton("⚙️ انتخاب تولید", callback_data="select_factory_product")],[InlineKeyboardButton(f"انبار: {'روشن' if wh else 'خاموش'}", callback_data=f"toggle_warehouse_{'0' if wh else '1'}")]])
-        await update.message.reply_text(f"وضعیت کارخونه: {'روشن' if status else 'خاموش'}", reply_markup=kb)
-    # ... (بقیه دکمه‌های پیشی، ماهی، میو خودکار)
-    else:
-        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb())
-
-# --- بخش لاگین واقعی با Telethon ---
-
 async def do_get_phone(update, context, uid):
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     phone = update.message.text.strip()
-    
     await update.message.reply_text("در حال اتصال به تلگرام... لطفا صبر کنید.")
     try:
         client = TelegramClient(StringSession(), API_ID, API_HASH)
@@ -254,15 +192,12 @@ async def do_get_otp(update, context, uid):
             del login_clients[uid]
         clear_state(uid)
         return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
-        
     otp = update.message.text.strip()
     state, phone = get_state(uid)
     client = login_clients.get(uid)
-    
     if not client:
         clear_state(uid)
         return await update.message.reply_text("جلسه منقضی شده. دوباره شماره را وارد کنید.")
-
     try:
         await client.sign_in(phone, otp)
         session_string = client.session.save()
@@ -282,7 +217,6 @@ async def do_get_2fa(update, context, uid):
     password = update.message.text.strip()
     state, phone = get_state(uid)
     client = login_clients.get(uid)
-    
     try:
         await client.sign_in(password=password)
         session_string = client.session.save()
@@ -292,8 +226,7 @@ async def do_get_2fa(update, context, uid):
         clear_state(uid)
         await update.message.reply_text("✅ اکانت شما با موفقیت متصل شد!", reply_markup=main_kb())
     except Exception as e:
-        await update.message.reply_text("❌ رمز اشتباه است. دوباره تلاش کنید:")# (توابع تنظیمات سلف مثل قبل)
-async def do_set_group(update, context, uid):
+        await update.message.reply_text("❌ رمز اشتباه است. دوباره تلاش کنید:")async def do_set_group(update, context, uid):
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
     gid = update.message.text.strip()
     db_execute("UPDATE users SET group_id=%s WHERE user_id=%s", (gid, uid))
@@ -312,7 +245,87 @@ async def do_set_factory_product(update, context, uid):
     prod = update.message.text.strip()
     db_execute("UPDATE users SET factory_product=%s WHERE user_id=%s", (prod, uid))
     clear_state(uid)
-    await update.message.reply_text(f"✅ محصول کارخونه روی {prod} تنظیم شد.", reply_markup=self_menu_kb())
+    await update.message.reply_text(f"✅ محصول کارخونه روی {prod} تنظیم شد.", reply_markup=self_menu_kb())async def menu_router(update, context):
+    text = update.message.text
+    uid = update.effective_user.id
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        await update.message.reply_text("⚠️ ابتدا در کانال‌ها عضو شوید:", reply_markup=join_kb(not_joined))
+        return
+
+    state, data = get_state(uid)
+    if state == "WAIT_GROUP_ID": return await do_set_group(update, context, uid)
+    if state == "WAIT_PHONE": return await do_get_phone(update, context, uid)
+    if state == "WAIT_OTP": return await do_get_otp(update, context, uid)
+    if state == "WAIT_MINER_TOKEN": return await do_set_miner_token(update, context, uid)
+    if state == "WAIT_FACTORY_PRODUCT": return await do_set_factory_product(update, context, uid)
+
+    if text == "🔌 فعال‌سازی سلف":
+        set_state(uid, "WAIT_PHONE")
+        await update.message.reply_text("لطفا شماره تلفن خود را با کد کشور وارد کنید (مثلاً +989123456789):", reply_markup=cancel_kb())
+    elif text == "⚙️ سلف":
+        await update.message.reply_text("به تنظیمات سلف خوش آمدید. یک گزینه را انتخاب کنید:", reply_markup=self_menu_kb())
+    elif text == "💎 خرید الماس":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("💵 خرید با میو", callback_data="buy_mio")], [InlineKeyboardButton("💳 خرید با پول", callback_data="buy_money")]])
+        await update.message.reply_text("روش خرید را انتخاب کنید:", reply_markup=kb)
+    elif text == "🎁 الماس رایگان":
+        ref_code = db_execute("SELECT ref_code FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        link = f"https://t.me/{context.bot.username}?start={ref_code}"
+        await update.message.reply_text(f"🎁 لینک رفرال شما:\n`{link}`\n\nبا هر نفر 50 الماس بگیرید.", parse_mode="Markdown")
+    elif text == "🔙 بازگشت":
+        clear_state(uid)
+        await update.message.reply_text("به منوی اصلی بازگشتید 👇", reply_markup=main_kb())
+    elif text == "🌐 تنظیم گپ":
+        set_state(uid, "WAIT_GROUP_ID")
+        await update.message.reply_text("لطفا آیدی عددی یا لینک گپ مورد نظر را ارسال کنید:", reply_markup=cancel_kb())
+    elif text == "⛏ ماینر":
+        status = db_execute("SELECT miner_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_miner_{'0' if status else '1'}")], [InlineKeyboardButton("⚙️ انتخاب توکن", callback_data="select_miner_token")]])
+        await update.message.reply_text(f"وضعیت ماینر: {'روشن' if status else 'خاموش'}", reply_markup=kb)
+    elif text == "🏭 کارخونه":
+        status = db_execute("SELECT factory_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        wh = db_execute("SELECT warehouse_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_factory_{'0' if status else '1'}")],[InlineKeyboardButton("⚙️ انتخاب تولید", callback_data="select_factory_product")],[InlineKeyboardButton(f"انبار: {'روشن' if wh else 'خاموش'}", callback_data=f"toggle_warehouse_{'0' if wh else '1'}")]])
+        await update.message.reply_text(f"وضعیت کارخونه: {'روشن' if status else 'خاموش'}", reply_markup=kb)
+    elif text == "🐈 پیشی":
+        status = db_execute("SELECT cat_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_cat_{'0' if status else '1'}")]])
+        await update.message.reply_text(f"وضعیت پیشی: {'روشن' if status else 'خاموش'}", reply_markup=kb)
+    elif text == "🐟 ماهی خودکار":
+        status = db_execute("SELECT fish_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_fish_{'0' if status else '1'}")]])
+        await update.message.reply_text(f"وضعیت ماهی خودکار: {'روشن' if status else 'خاموش'}", reply_markup=kb)
+    elif text == "💬 میو خودکار":
+        status = db_execute("SELECT auto_meow_status FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_meow_{'0' if status else '1'}")]])
+        await update.message.reply_text(f"وضعیت میو خودکار: {'روشن' if status else 'خاموش'}", reply_markup=kb)
+    else:
+        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb())async def do_buy_mio_amount(update, context, uid):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    try:
+        amount = int(fa_to_en(update.message.text))
+        total_mio = amount * 500000
+        set_state(uid, "WAIT_MIO_CARD", f"{amount}|{total_mio}")
+        await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_mio:,} میو پوینت\n\nشماره کارت میویی خود را وارد کنید:")
+    except: await update.message.reply_text("عدد معتبر وارد کنید.")
+
+async def do_buy_mio_card(update, context, uid):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    card = update.message.text.strip()
+    state, data = get_state(uid)
+    amount, total_mio = data.split("|")
+    await context.bot.send_message(ADMIN_ID, f"💎 درخواست خرید الماس (با میو)\nکاربر: {uid}\nالماس: {amount}\nمبلغ: {total_mio} میو\nکارت: {card}")
+    clear_state(uid)
+    await update.message.reply_text("✅ درخواست شما ثبت شد.", reply_markup=main_kb())
+
+async def do_buy_money_amount(update, context, uid):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    try:
+        amount = int(fa_to_en(update.message.text))
+        total_money = amount * 100000
+        set_state(uid, "WAIT_MONEY_RECEIPT", f"{amount}|{total_money}")
+        await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_money:,} تومان\n\nلطفا مبلغ را به کارت زیر واریز کنید:\n`{CARD_NUMBER}`\nبنام {CARD_NAME}\n\nسپس عکس رسید را ارسال کنید.", parse_mode="Markdown")
+    except: await update.message.reply_text("عدد معتبر وارد کنید.")
 
 async def on_callback(update, context):
     query = update.callback_query
@@ -335,7 +348,6 @@ async def on_callback(update, context):
         await query.answer()
         set_state(uid, "WAIT_DIAMOND_MONEY")
         await query.edit_message_text("💎 چند الماس می‌خواهید؟\n(هر ۱ الماس = 100,000 تومان)")
-    # (بقیه دکمه‌های تاگل مثل قبل...)
     elif data.startswith("toggle_"):
         await query.answer()
         parts = data.split("_")
@@ -351,35 +363,8 @@ async def on_callback(update, context):
         await query.answer()
         set_state(uid, "WAIT_FACTORY_PRODUCT")
         await query.edit_message_text("لطفا یکی از این محصولات را بنویسید:\nابنبات, کیک, تکنولوژی, خودرو, هواپیما, تکنولوژی پیشرفته")
-    # (خرید الماس با میو و پول مثل قبل...)
     else:
         await query.answer()
-
-# (توابع خرید الماس مثل قبل...)
-async def do_buy_mio_amount(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
-    try:
-        amount = int(fa_to_en(update.message.text))
-        total_mio = amount * 500000
-        set_state(uid, "WAIT_MIO_CARD", f"{amount}|{total_mio}")
-        await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_mio:,} میو پوینت\n\nشماره کارت میویی خود را وارد کنید:")
-    except: await update.message.reply_text("عدد معتبر وارد کنید.")async def do_buy_mio_card(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
-    card = update.message.text.strip()
-    state, data = get_state(uid)
-    amount, total_mio = data.split("|")
-    await context.bot.send_message(ADMIN_ID, f"💎 درخواست خرید الماس (با میو)\nکاربر: {uid}\nالماس: {amount}\nمبلغ: {total_mio} میو\nکارت: {card}")
-    clear_state(uid)
-    await update.message.reply_text("✅ درخواست شما ثبت شد.", reply_markup=main_kb())
-
-async def do_buy_money_amount(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
-    try:
-        amount = int(fa_to_en(update.message.text))
-        total_money = amount * 100000
-        set_state(uid, "WAIT_MONEY_RECEIPT", f"{amount}|{total_money}")
-        await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_money:,} تومان\n\nلطفا مبلغ را به کارت زیر واریز کنید:\n`{CARD_NUMBER}`\nبنام {CARD_NAME}\n\nسپس عکس رسید را ارسال کنید.", parse_mode="Markdown")
-    except: await update.message.reply_text("عدد معتبر وارد کنید.")
 
 async def on_photo(update, context):
     uid = update.effective_user.id
@@ -403,9 +388,7 @@ async def approve_diamond_callback(update, context):
         await context.bot.send_message(uid, f"🎉 {amount} الماس به حساب شما اضافه شد!")
     elif data == "reject":
         await query.edit_message_caption("❌ رد شد.")
-    await query.answer()
-
-app = ApplicationBuilder().token(TOKEN).build()
+    await query.answer()app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(on_callback, pattern="^(check_join|buy_mio|buy_money|toggle_|select_)"))
