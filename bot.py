@@ -4,20 +4,13 @@ import os
 import random
 import string
 from aiohttp import web
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, KeyboardButton
-)
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import psycopg2
 from psycopg2 import pool
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
-
 TOKEN = os.environ.get("TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 API_ID = int(os.environ.get("API_ID", 0))
@@ -33,7 +26,8 @@ REQUIRED_CHANNELS = [
 
 logging.basicConfig(level=logging.INFO)
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
-login_clients = {}def db_execute(query, params=None, fetch=False):
+login_clients = {}
+def db_execute(query, params=None, fetch=False):
     conn = connection_pool.getconn()
     try:
         c = conn.cursor()
@@ -96,7 +90,8 @@ def init_db():
         except Exception as e:
             logging.error(f"Init DB error: {e}")
 
-init_db()def gen_ref_code():
+init_db()
+def gen_ref_code():
     while True:
         code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         r = db_execute("SELECT 1 FROM users WHERE ref_code=%s", (code,), fetch=True)
@@ -129,7 +124,8 @@ async def check_membership(context, uid):
                 not_joined.append(ch)
         except Exception:
             not_joined.append(ch)
-    return not_joineddef main_kb():
+    return not_joined
+    def main_kb():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🔌 فعال‌سازی سلف")],
         [KeyboardButton("⚙️ سلف"), KeyboardButton("💎 خرید الماس")],
@@ -151,7 +147,8 @@ def cancel_kb():
 def join_kb(not_joined):
     buttons = [[InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])] for ch in not_joined]
     buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
-    return InlineKeyboardMarkup(buttons)async def process_start_logic(update, context, uid, user):
+    return InlineKeyboardMarkup(buttons)
+    async def process_start_logic(update, context, uid, user):
     if not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
         db_execute("INSERT INTO users (user_id, ref_code, full_name) VALUES (%s, %s, %s)", (uid, gen_ref_code(), user.full_name))
     clear_state(uid)
@@ -226,7 +223,8 @@ async def do_get_2fa(update, context, uid):
         clear_state(uid)
         await update.message.reply_text("✅ اکانت شما با موفقیت متصل شد!", reply_markup=main_kb())
     except Exception as e:
-        await update.message.reply_text("❌ رمز اشتباه است. دوباره تلاش کنید:")async def do_set_group(update, context, uid):
+        await update.message.reply_text("❌ رمز اشتباه است. دوباره تلاش کنید:")
+        async def do_set_group(update, context, uid):
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
     gid = update.message.text.strip()
     db_execute("UPDATE users SET group_id=%s WHERE user_id=%s", (gid, uid))
@@ -245,7 +243,9 @@ async def do_set_factory_product(update, context, uid):
     prod = update.message.text.strip()
     db_execute("UPDATE users SET factory_product=%s WHERE user_id=%s", (prod, uid))
     clear_state(uid)
-    await update.message.reply_text(f"✅ محصول کارخونه روی {prod} تنظیم شد.", reply_markup=self_menu_kb())async def menu_router(update, context):
+    await update.message.reply_text(f"✅ محصول کارخونه روی {prod} تنظیم شد.", reply_markup=self_menu_kb())
+
+async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
     not_joined = await check_membership(context, uid)
@@ -300,7 +300,8 @@ async def do_set_factory_product(update, context, uid):
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("خاموش" if status else "روشن", callback_data=f"toggle_meow_{'0' if status else '1'}")]])
         await update.message.reply_text(f"وضعیت میو خودکار: {'روشن' if status else 'خاموش'}", reply_markup=kb)
     else:
-        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb())async def do_buy_mio_amount(update, context, uid):
+        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb())
+        async def do_buy_mio_amount(update, context, uid):
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     try:
         amount = int(fa_to_en(update.message.text))
@@ -388,7 +389,8 @@ async def approve_diamond_callback(update, context):
         await context.bot.send_message(uid, f"🎉 {amount} الماس به حساب شما اضافه شد!")
     elif data == "reject":
         await query.edit_message_caption("❌ رد شد.")
-    await query.answer()app = ApplicationBuilder().token(TOKEN).build()
+    await query.answer()
+    app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(on_callback, pattern="^(check_join|buy_mio|buy_money|toggle_|select_)"))
