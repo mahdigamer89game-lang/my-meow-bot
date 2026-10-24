@@ -149,7 +149,7 @@ def join_kb(not_joined):
     buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
     return InlineKeyboardMarkup(buttons)
     async def process_start_logic(update, context, uid, user):
-    if not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
+    if     not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
         db_execute("INSERT INTO users (user_id, ref_code, full_name) VALUES (%s, %s, %s)", (uid, gen_ref_code(), user.full_name))
     clear_state(uid)
     diamonds = db_execute("SELECT diamonds FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
