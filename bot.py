@@ -185,7 +185,27 @@ async def do_get_phone(update, context, uid):
         else:
             await client.disconnect()
             await update.message.reply_text("این شماره قبلا ثبت شده است.")
-        except Exception as e:
+        async def do_get_phone(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    
+    phone = update.message.text.strip()
+    await update.message.reply_text("در حال اتصال به تلگرام... لطفا صبر کنید.")
+    
+    try:
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.send_code_request(phone)
+            login_clients[uid] = client
+            set_state(uid, "WAIT_OTP", phone)
+            await update.message.reply_text("کد ورود به تلگرام شما ارسال شد. لطفا کد را وارد کنید:", reply_markup=cancel_kb())
+        else:
+            await client.disconnect()
+            await update.message.reply_text("این شماره قبلا ثبت شده است.")
+            
+    except Exception as e:
         logging.error(f"Login error: {e}")
         error_msg = str(e)
         if "PHONE_NUMBER_INVALID" in error_msg:
@@ -196,7 +216,6 @@ async def do_get_phone(update, context, uid):
             await update.message.reply_text("❌ تلاش‌های زیاد. لطفا چند دقیقه صبر کنید.")
         else:
             await update.message.reply_text(f"❌ خطا: سرور Render اجازه ارسال کد را نمی‌دهد (مشکل IP).")
-
 async def do_get_otp(update, context, uid):
     if update.message.text == "🔙 بازگشت":
         if uid in login_clients:
