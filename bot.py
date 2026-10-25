@@ -185,9 +185,17 @@ async def do_get_phone(update, context, uid):
         else:
             await client.disconnect()
             await update.message.reply_text("این شماره قبلا ثبت شده است.")
-    except Exception as e:
+        except Exception as e:
         logging.error(f"Login error: {e}")
-        await update.message.reply_text("خطا در ارسال کد. آیا شماره را درست وارد کردید؟ دوباره تلاش کنید.")
+        error_msg = str(e)
+        if "PHONE_NUMBER_INVALID" in error_msg:
+            await update.message.reply_text("❌ شماره وارد شده اشتباه است. لطفا با فرمت +989123456789 وارد کنید.")
+        elif "PHONE_NUMBER_BANNED" in error_msg:
+            await update.message.reply_text("❌ این شماره در تلگرام مسدود شده است.")
+        elif "FLOOD_WAIT" in error_msg:
+            await update.message.reply_text("❌ تلاش‌های زیاد. لطفا چند دقیقه صبر کنید.")
+        else:
+            await update.message.reply_text(f"❌ خطا: سرور Render اجازه ارسال کد را نمی‌دهد (مشکل IP).")
 
 async def do_get_otp(update, context, uid):
     if update.message.text == "🔙 بازگشت":
