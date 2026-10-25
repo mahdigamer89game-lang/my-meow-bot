@@ -172,23 +172,6 @@ async def do_get_phone(update, context, uid):
     if update.message.text == "🔙 بازگشت":
         clear_state(uid)
         return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
-    phone = update.message.text.strip()
-    await update.message.reply_text("در حال اتصال به تلگرام... لطفا صبر کنید.")
-    try:
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
-        await client.connect()
-        if not await client.is_user_authorized():
-            await client.send_code_request(phone)
-            login_clients[uid] = client
-            set_state(uid, "WAIT_OTP", phone)
-            await update.message.reply_text("کد ورود به تلگرام شما ارسال شد. لطفا کد را وارد کنید:", reply_markup=cancel_kb())
-        else:
-            await client.disconnect()
-            await update.message.reply_text("این شماره قبلا ثبت شده است.")
-        async def do_get_phone(update, context, uid):
-    if update.message.text == "🔙 بازگشت":
-        clear_state(uid)
-        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     
     phone = update.message.text.strip()
     await update.message.reply_text("در حال اتصال به تلگرام... لطفا صبر کنید.")
@@ -196,6 +179,7 @@ async def do_get_phone(update, context, uid):
     try:
         client = TelegramClient(StringSession(), API_ID, API_HASH)
         await client.connect()
+        
         if not await client.is_user_authorized():
             await client.send_code_request(phone)
             login_clients[uid] = client
@@ -208,6 +192,7 @@ async def do_get_phone(update, context, uid):
     except Exception as e:
         logging.error(f"Login error: {e}")
         error_msg = str(e)
+        
         if "PHONE_NUMBER_INVALID" in error_msg:
             await update.message.reply_text("❌ شماره وارد شده اشتباه است. لطفا با فرمت +989123456789 وارد کنید.")
         elif "PHONE_NUMBER_BANNED" in error_msg:
@@ -215,7 +200,8 @@ async def do_get_phone(update, context, uid):
         elif "FLOOD_WAIT" in error_msg:
             await update.message.reply_text("❌ تلاش‌های زیاد. لطفا چند دقیقه صبر کنید.")
         else:
-            await update.message.reply_text(f"❌ خطا: سرور Render اجازه ارسال کد را نمی‌دهد (مشکل IP).")
+            await update.message.reply_text("❌ خطا: سرور Render اجازه ارسال کد را نمی‌دهد (مشکل IP).")
+
 async def do_get_otp(update, context, uid):
     if update.message.text == "🔙 بازگشت":
         if uid in login_clients:
@@ -223,12 +209,15 @@ async def do_get_otp(update, context, uid):
             del login_clients[uid]
         clear_state(uid)
         return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    
     otp = update.message.text.strip()
     state, phone = get_state(uid)
     client = login_clients.get(uid)
+    
     if not client:
         clear_state(uid)
         return await update.message.reply_text("جلسه منقضی شده. دوباره شماره را وارد کنید.")
+        
     try:
         await client.sign_in(phone, otp)
         session_string = client.session.save()
@@ -248,6 +237,7 @@ async def do_get_2fa(update, context, uid):
     password = update.message.text.strip()
     state, phone = get_state(uid)
     client = login_clients.get(uid)
+    
     try:
         await client.sign_in(password=password)
         session_string = client.session.save()
@@ -352,7 +342,8 @@ async def do_buy_mio_amount(update, context, uid):
         total_mio = amount * 500000
         set_state(uid, "WAIT_MIO_CARD", f"{amount}|{total_mio}")
         await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_mio:,} میو پوینت\n\nشماره کارت میویی خود را وارد کنید:")
-    except: await update.message.reply_text("عدد معتبر وارد کنید.")
+    except:
+        await update.message.reply_text("عدد معتبر وارد کنید.")
 
 async def do_buy_mio_card(update, context, uid):
     if update.message.text == "🔙 بازگشت":
@@ -374,7 +365,8 @@ async def do_buy_money_amount(update, context, uid):
         total_money = amount * 100000
         set_state(uid, "WAIT_MONEY_RECEIPT", f"{amount}|{total_money}")
         await update.message.reply_text(f"✅ مقدار: {amount} الماس\n💰 قیمت: {total_money:,} تومان\n\nلطفا مبلغ را به کارت زیر واریز کنید:\n`{CARD_NUMBER}`\nبنام {CARD_NAME}\n\nسپس عکس رسید را ارسال کنید.", parse_mode="Markdown")
-    except: await update.message.reply_text("عدد معتبر وارد کنید.")
+    except:
+        await update.message.reply_text("عدد معتبر وارد کنید.")
 
 async def on_callback(update, context):
     query = update.callback_query
