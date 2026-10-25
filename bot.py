@@ -11,6 +11,7 @@ from psycopg2 import pool
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
+
 TOKEN = os.environ.get("TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 API_ID = int(os.environ.get("API_ID", 0))
@@ -27,6 +28,7 @@ REQUIRED_CHANNELS = [
 logging.basicConfig(level=logging.INFO)
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
 login_clients = {}
+
 def db_execute(query, params=None, fetch=False):
     conn = connection_pool.getconn()
     try:
@@ -91,6 +93,7 @@ def init_db():
             logging.error(f"Init DB error: {e}")
 
 init_db()
+
 def gen_ref_code():
     while True:
         code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
@@ -125,8 +128,9 @@ async def check_membership(context, uid):
         except Exception:
             not_joined.append(ch)
     return not_joined
-    def main_kb():
-        return ReplyKeyboardMarkup([
+
+def main_kb():
+    return ReplyKeyboardMarkup([
         [KeyboardButton("🔌 فعال‌سازی سلف")],
         [KeyboardButton("⚙️ سلف"), KeyboardButton("💎 خرید الماس")],
         [KeyboardButton("🎁 الماس رایگان")]
@@ -148,8 +152,9 @@ def join_kb(not_joined):
     buttons = [[InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])] for ch in not_joined]
     buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
     return InlineKeyboardMarkup(buttons)
-    async def process_start_logic(update, context, uid, user):
-    if     not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
+
+async def process_start_logic(update, context, uid, user):
+    if not db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True):
         db_execute("INSERT INTO users (user_id, ref_code, full_name) VALUES (%s, %s, %s)", (uid, gen_ref_code(), user.full_name))
     clear_state(uid)
     diamonds = db_execute("SELECT diamonds FROM users WHERE user_id=%s", (uid,), fetch=True)[0]
@@ -164,7 +169,9 @@ async def start(update, context):
     await process_start_logic(update, context, uid, update.effective_user)
 
 async def do_get_phone(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     phone = update.message.text.strip()
     await update.message.reply_text("در حال اتصال به تلگرام... لطفا صبر کنید.")
     try:
@@ -224,22 +231,29 @@ async def do_get_2fa(update, context, uid):
         await update.message.reply_text("✅ اکانت شما با موفقیت متصل شد!", reply_markup=main_kb())
     except Exception as e:
         await update.message.reply_text("❌ رمز اشتباه است. دوباره تلاش کنید:")
-        async def do_set_group(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
+
+async def do_set_group(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
     gid = update.message.text.strip()
     db_execute("UPDATE users SET group_id=%s WHERE user_id=%s", (gid, uid))
     clear_state(uid)
     await update.message.reply_text("✅ گپ با موفقیت تنظیم شد.", reply_markup=self_menu_kb())
 
 async def do_set_miner_token(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
     token = update.message.text.strip().upper()
     db_execute("UPDATE users SET miner_token=%s WHERE user_id=%s", (token, uid))
     clear_state(uid)
     await update.message.reply_text(f"✅ توکن ماینر روی {token} تنظیم شد.", reply_markup=self_menu_kb())
 
 async def do_set_factory_product(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=self_menu_kb())
     prod = update.message.text.strip()
     db_execute("UPDATE users SET factory_product=%s WHERE user_id=%s", (prod, uid))
     clear_state(uid)
@@ -301,8 +315,11 @@ async def menu_router(update, context):
         await update.message.reply_text(f"وضعیت میو خودکار: {'روشن' if status else 'خاموش'}", reply_markup=kb)
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb())
-        async def do_buy_mio_amount(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+
+async def do_buy_mio_amount(update, context, uid):
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     try:
         amount = int(fa_to_en(update.message.text))
         total_mio = amount * 500000
@@ -311,7 +328,9 @@ async def menu_router(update, context):
     except: await update.message.reply_text("عدد معتبر وارد کنید.")
 
 async def do_buy_mio_card(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     card = update.message.text.strip()
     state, data = get_state(uid)
     amount, total_mio = data.split("|")
@@ -320,7 +339,9 @@ async def do_buy_mio_card(update, context, uid):
     await update.message.reply_text("✅ درخواست شما ثبت شد.", reply_markup=main_kb())
 
 async def do_buy_money_amount(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
+    if update.message.text == "🔙 بازگشت":
+        clear_state(uid)
+        return await update.message.reply_text("لغو شد.", reply_markup=main_kb())
     try:
         amount = int(fa_to_en(update.message.text))
         total_money = amount * 100000
@@ -336,7 +357,8 @@ async def on_callback(update, context):
     if data == "check_join":
         await query.answer()
         not_joined = await check_membership(context, uid)
-        if not_joined: await query.edit_message_text("⚠️ هنوز عضو نشدی!", reply_markup=join_kb(not_joined))
+        if not_joined:
+            await query.edit_message_text("⚠️ هنوز عضو نشدی!", reply_markup=join_kb(not_joined))
         else:
             await process_start_logic(update, context, uid, query.from_user)
             try: await query.delete()
@@ -390,7 +412,8 @@ async def approve_diamond_callback(update, context):
     elif data == "reject":
         await query.edit_message_caption("❌ رد شد.")
     await query.answer()
-    app = ApplicationBuilder().token(TOKEN).build()
+
+app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(on_callback, pattern="^(check_join|buy_mio|buy_money|toggle_|select_)"))
@@ -409,7 +432,8 @@ async def state_router(update, context):
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, state_router))
 
 async def start_web_server():
-    async def handle(request): return web.Response(text="Bot is running ✅")
+    async def handle(request):
+        return web.Response(text="Bot is running ✅")
     web_app = web.Application()
     web_app.router.add_get('/', handle)
     web_app.router.add_route('*', '/ping', handle)
@@ -425,7 +449,8 @@ async def main():
         await app.start()
         await app.updater.start_polling()
         print("Bot started! ✅")
-        while True: await asyncio.sleep(3600)
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())
