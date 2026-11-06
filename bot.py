@@ -268,7 +268,8 @@ async def start(update, context):
         text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
         await update.message.reply_text(text, reply_markup=join_kb(not_joined))
         return
-    await process_start_logic(update, context, uid, user)async def menu_router(update, context):
+    await process_start_logic(update, context, uid, user)
+    async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
     not_joined = await check_membership(context, uid)
