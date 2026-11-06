@@ -270,7 +270,7 @@ async def start(update, context):
         return
     await process_start_logic(update, context, uid, user)
     async def menu_router(update, context):
-    text = update.message.text
+        text = update.message.text
     uid = update.effective_user.id
     not_joined = await check_membership(context, uid)
     if not_joined:
