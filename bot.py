@@ -43,6 +43,20 @@ def db_execute(query, params=None, fetch=False):
     finally:
         connection_pool.putconn(conn)
 
+def db_execute_all(query, params=None):
+    conn = connection_pool.getconn()
+    try:
+        c = conn.cursor()
+        c.execute(query, params)
+        result = c.fetchall()
+        c.close()
+        return result
+    except Exception as e:
+        logging.error(f"DB Error: {e}")
+        raise
+    finally:
+        connection_pool.putconn(conn)
+
 def init_db():
     queries = [
         """CREATE TABLE IF NOT EXISTS users (
@@ -71,10 +85,8 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS pending_refs (user_id BIGINT PRIMARY KEY, ref_code VARCHAR(20))"""
     ]
     for q in queries:
-        try:
-            db_execute(q)
-        except Exception as e:
-            logging.error(f"Init DB error: {e}")
+        try: db_execute(q)
+        except Exception as e: logging.error(f"Init DB error: {e}")
 
 init_db()
 
@@ -96,8 +108,7 @@ def gen_ref_code():
     while True:
         code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         r = db_execute("SELECT 1 FROM users WHERE ref_code=%s", (code,), fetch=True)
-        if not r:
-            return code
+        if not r: return code
 
 def get_wallet(uid):
     r = db_execute("SELECT wallet FROM users WHERE user_id=%s", (uid,), fetch=True)
@@ -142,20 +153,6 @@ def search_users(query):
     q = f"%{query}%"
     return db_execute_all("""SELECT user_id, full_name, username, wallet FROM users WHERE full_name ILIKE %s OR username ILIKE %s OR CAST(user_id AS TEXT) LIKE %s ORDER BY joined_at DESC LIMIT 20""", (q, q, q))
 
-def db_execute_all(query, params=None):
-    conn = connection_pool.getconn()
-    try:
-        c = conn.cursor()
-        c.execute(query, params)
-        result = c.fetchall()
-        c.close()
-        return result
-    except Exception as e:
-        logging.error(f"DB Error: {e}")
-        raise
-    finally:
-        connection_pool.putconn(conn)
-
 def fa_to_en(text):
     return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
 
@@ -177,12 +174,9 @@ async def check_membership(context, uid):
     for ch in REQUIRED_CHANNELS:
         try:
             member = await context.bot.get_chat_member(ch["id"], uid)
-            if member.status in ["left", "kicked"]:
-                not_joined.append(ch)
-        except Exception:
-            not_joined.append(ch)
+            if member.status in ["left", "kicked"]: not_joined.append(ch)
+        except: not_joined.append(ch)
     return not_joined
-
 def main_kb(uid=None):
     rows = [
         [KeyboardButton("🛒 خرید میو پوینت")],
@@ -245,10 +239,8 @@ async def process_start_logic(update, context, uid, user):
                     db_execute("UPDATE users SET referred_by=%s WHERE user_id=%s", (ref_uid, uid))
                     db_execute("UPDATE users SET referrals_count=referrals_count+1, total_reward=total_reward+%s WHERE user_id=%s", (REFERRAL_REWARD, ref_uid))
                     add_transaction(ref_uid, REFERRAL_REWARD, "referral", f"دعوت کاربر {user.full_name}")
-                    try:
-                        await context.bot.send_message(ref_uid, f"👤 کاربر {user.full_name} با لینک شما وارد شد!\n🎁 {REFERRAL_REWARD:,} میوپوینت به جایزه‌های شما اضافه شد.")
-                    except Exception as e:
-                        logging.error(e)
+                    try: await context.bot.send_message(ref_uid, f"👤 کاربر {user.full_name} با لینک شما وارد شد!\n🎁 {REFERRAL_REWARD:,} میوپوینت به جایزه‌های شما اضافه شد.")
+                    except: pass
         db_execute("DELETE FROM pending_refs WHERE user_id=%s", (uid,))
     clear_state(uid)
     await context.bot.send_message(uid, "✅ عضویت شما تایید شد. با تشکر!\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=main_kb(uid))
@@ -263,24 +255,21 @@ async def start(update, context):
     not_joined = await check_membership(context, uid)
     if not_joined:
         text = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-        for ch in not_joined:
-            text += f"📢 {ch['id']}\n"
+        for ch in not_joined: text += f"📢 {ch['id']}\n"
         text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
         await update.message.reply_text(text, reply_markup=join_kb(not_joined))
         return
     await process_start_logic(update, context, uid, user)
-    async def menu_router(update, context):
-        text = update.message.text
+async def menu_router(update, context):
+    text = update.message.text
     uid = update.effective_user.id
     not_joined = await check_membership(context, uid)
     if not_joined:
         txt = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-        for ch in not_joined:
-            txt += f"📢 {ch['id']}\n"
+        for ch in not_joined: txt += f"📢 {ch['id']}\n"
         txt += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
         await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
         return
-
     state, data = get_state(uid)
     if state == "ADMIN_REPLY": return await do_send_reply(update, context, uid, data)
     if state == "WALLET_AMOUNT": return await do_wallet_amount(update, context, uid)
@@ -357,7 +346,6 @@ async def start(update, context):
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
-
 async def show_users_page(update, context, page):
     total = get_users_count()
     users = get_users_page(page)
@@ -400,8 +388,7 @@ async def do_msg_user(update, context, uid, data):
     try:
         await context.bot.send_message(target_uid, f"📢 پیام از ادمین:\n\n{text}", reply_markup=main_kb(target_uid))
         await update.message.reply_text(f"✅ پیام به کاربر {target_uid} ارسال شد.", reply_markup=admin_kb())
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {e}", reply_markup=admin_kb())
+    except Exception as e: await update.message.reply_text(f"❌ خطا: {e}", reply_markup=admin_kb())
     clear_state(uid)
 
 async def do_charge_user(update, context, uid, data):
@@ -475,7 +462,7 @@ async def do_charge_all(update, context, uid):
             db_execute("UPDATE users SET wallet = wallet + %s WHERE user_id=%s", (amount, u))
             db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (u, amount, "add", "شارژ همگانی از ادمین"))
             success += 1
-        except Exception as e: logging.error(f"Charge all error for {u}: {e}")
+        except: pass
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} میوپوینت به {success} کاربر اضافه شد.", reply_markup=admin_kb())
 
@@ -493,7 +480,7 @@ async def do_bonus_all(update, context, uid):
             db_execute("UPDATE users SET total_reward = total_reward + %s WHERE user_id=%s", (amount, u))
             db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (u, amount, "bonus", "جایزه همگانی از ادمین"))
             success += 1
-        except Exception as e: logging.error(f"Bonus all error for {u}: {e}")
+        except: pass
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} میوپوینت به جایزه‌های {success} کاربر اضافه شد.", reply_markup=admin_kb())
 
@@ -511,7 +498,7 @@ async def do_deduct_bonus_all(update, context, uid):
             db_execute("UPDATE users SET total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s", (amount, u))
             db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (u, -amount, "sub", "کسر جایزه همگانی از ادمین"))
             success += 1
-        except Exception as e: logging.error(f"Deduct bonus all error for {u}: {e}")
+        except: pass
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.", reply_markup=admin_kb())
 
