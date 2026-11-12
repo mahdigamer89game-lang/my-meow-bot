@@ -84,8 +84,10 @@ async def ensure_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return
     pool = context.application.bot_data["pool"]
+    try:
     await pool.execute("""INSERT INTO users(user_id, username, first_name, referral_code) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username, first_name=EXCLUDED.first_name""", user.id, user.username, user.first_name, str(user.id))
-
+except Exception:
+    pass
 async def is_admin(update):
     return bool(update.effective_user and update.effective_user.id == ADMIN_ID)
 
