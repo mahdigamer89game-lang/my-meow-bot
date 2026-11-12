@@ -3,7 +3,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-TOKEN = "8985946672:AAEE0OGCl9-et8VKhN_PmdGOWzgQ81xduC8"
+TOKEN = "9193211471:AAH4WwX0xgwznmM8rDSwgk0aoQKj4yJ04Ww"
 ADMIN_ID = 1713081033
 
 logging.basicConfig(level=logging.INFO)
