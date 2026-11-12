@@ -52,9 +52,15 @@ async def add_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid): return
-    if user_states.get(uid) != "WAIT_GROUP_ID": return
+    
+    if user_states.get(uid) != "WAIT_GROUP_ID": 
+        return
     
     gid = update.message.text.strip()
+    
+    if gid.startswith("/") or gid in ["➕ افزودن گروه جدید", "📋 گروه‌های من", "🔙 بازگشت"]:
+        return
+        
     try:
         chat = await context.bot.get_chat(gid)
         gname = chat.title or f"گروه {gid}"
@@ -62,9 +68,9 @@ async def receive_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_groups[uid] = {}
         user_groups[uid][gid] = gname
         await update.message.reply_text(f"✅ گروه {gname} با موفقیت ثبت شد.", reply_markup=main_kb())
+        user_states[uid] = None
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در پیدا کردن گروه: {e}\nمطمئن شو ربات تو گروه ادمینه و آیدی درسته.")
-    user_states[uid] = None
+        await update.message.reply_text(f"❌ خطا: {e}\nمطمئن شو ربات تو گروه ادمینه و آیدی درسته (با -100 شروع میشه).")
 
 async def show_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -125,7 +131,6 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(uid): return
     state = user_states.get(uid)
     
-    # اگه کاربر منتظر آیدی گروه بود، این تابع کاری نکنه
     if state == "WAIT_GROUP_ID":
         return
         
@@ -159,7 +164,6 @@ app.add_handler(MessageHandler(filters.Regex("^📋 گروه‌های من$"), s
 app.add_handler(MessageHandler(filters.Regex("^📌 .*$"), handle_group_selection))
 app.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت$"), handle_group_selection))
 
-# هندلر مخصوص دریافت آیدی گروه (قبل از دریافت محتوا قرار می‌گیرد)
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_group_id), group=1)
 
 app.add_handler(CallbackQueryHandler(action_callback, pattern="^send_"))
