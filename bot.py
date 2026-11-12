@@ -1,172 +1,276 @@
 import asyncio
 import logging
+import os
+import random
+import string
+from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import psycopg2
+from psycopg2 import pool
 
-TOKEN = "9193211471:AAH4WwX0xgwznmM8rDSwgk0aoQKj4yJ04Ww"
+TOKEN = os.environ.get("TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_ID = 1713081033
+CARD_NUMBER = "5047061673513814"
+CARD_NAME = "صادقی"
+REFERRAL_REWARD = 150000
+MIN_WITHDRAW = 500000
+MIN_REFERRALS = 5
+USERS_PER_PAGE = 10
+
+REQUIRED_CHANNELS = [
+    {"id": "@Channle_Meowie_Buy", "link": "https://t.me/Channle_Meowie_Buy"},
+    {"id": "@Meow_Point_Free", "link": "https://t.me/Meow_Point_Free"},
+]
 
 logging.basicConfig(level=logging.INFO)
-user_groups = {}
-user_states = {}
+connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
+
+def db_execute(query, params=None, fetch=False):
+    conn = connection_pool.getconn()
+    try:
+        c = conn.cursor()
+        c.execute(query, params)
+        result = c.fetchone() if fetch else None
+        conn.commit()
+        c.close()
+        return result
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"DB Error: {e}")
+        raise
+    finally:
+        connection_pool.putconn(conn)
+
+def db_execute_all(query, params=None):
+    conn = connection_pool.getconn()
+    try:
+        c = conn.cursor()
+        c.execute(query, params)
+        result = c.fetchall()
+        c.close()
+        return result
+    except Exception as e:
+        logging.error(f"DB Error: {e}")
+        raise
+    finally:
+        connection_pool.putconn(conn)
+
+def init_db():
+    queries = [
+        """CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            wallet BIGINT DEFAULT 0,
+            ref_code VARCHAR(10) UNIQUE,
+            referred_by BIGINT,
+            referrals_count INTEGER DEFAULT 0,
+            total_reward BIGINT DEFAULT 0,
+            full_name TEXT,
+            username TEXT,
+            joined_at TIMESTAMP DEFAULT NOW(),
+            notes TEXT DEFAULT ''
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_charges (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, photo_id TEXT, card_photo_id TEXT, status TEXT DEFAULT 'pending'
+        )""",
+        """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
+        """CREATE TABLE IF NOT EXISTS states (user_id BIGINT PRIMARY KEY, state TEXT, data TEXT)""",
+        """CREATE TABLE IF NOT EXISTS withdraw_requests (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending'
+        )""",
+        """CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, type TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_refs (user_id BIGINT PRIMARY KEY, ref_code VARCHAR(20))"""
+    ]
+    for q in queries:
+        try: db_execute(q)
+        except Exception as e: logging.error(f"Init DB error: {e}")
+
+init_db()
+
+def get_setting(key, default):
+    r = db_execute("SELECT value FROM settings WHERE key=%s", (key,), fetch=True)
+    if r is None:
+        db_execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, str(default)))
+        return default
+    return int(r[0])
+
+def set_setting(key, value):
+    db_execute("""INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""", (key, str(value)))
+
+def get_price_high(): return get_setting("price_high", 2100)
+def get_price_low(): return get_setting("price_low", 2500)
+def get_threshold(): return get_setting("threshold", 100)
+
+def gen_ref_code():
+    while True:
+        code = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        r = db_execute("SELECT 1 FROM users WHERE ref_code=%s", (code,), fetch=True)
+        if not r: return code
+
+def get_wallet(uid):
+    r = db_execute("SELECT wallet FROM users WHERE user_id=%s", (uid,), fetch=True)
+    if r is None:
+        db_execute("INSERT INTO users (user_id, wallet, ref_code) VALUES (%s, 0, %s)", (uid, gen_ref_code()))
+        return 0
+    return r[0]
+
+def add_wallet(uid, delta, description=""):
+    new = get_wallet(uid) + delta
+    db_execute("""INSERT INTO users (user_id, wallet) VALUES (%s, %s) ON CONFLICT (user_id) DO UPDATE SET wallet = EXCLUDED.wallet""", (uid, new))
+    if description:
+        db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (uid, delta, "add" if delta > 0 else "sub", description))
+    return new
+
+def add_transaction(uid, amount, ttype, desc):
+    db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (uid, amount, ttype, desc))
+
+def get_user(uid):
+    return db_execute("SELECT user_id, wallet, ref_code, referred_by, referrals_count, total_reward, full_name, username, joined_at, notes FROM users WHERE user_id=%s", (uid,), fetch=True)
+
+def get_user_by_ref(code):
+    return db_execute("SELECT user_id FROM users WHERE ref_code=%s", (code,), fetch=True)
+
+def user_exists(uid):
+    r = db_execute("SELECT 1 FROM users WHERE user_id=%s", (uid,), fetch=True)
+    return r is not None
+
+def get_all_users():
+    rows = db_execute_all("SELECT user_id FROM users ORDER BY joined_at DESC")
+    return [r[0] for r in rows]
+
+def get_users_page(page=0):
+    offset = page * USERS_PER_PAGE
+    return db_execute_all("SELECT user_id, full_name, username, wallet FROM users ORDER BY joined_at DESC LIMIT %s OFFSET %s", (USERS_PER_PAGE, offset))
+
+def get_users_count():
+    r = db_execute("SELECT COUNT(*) FROM users", fetch=True)
+    return r[0] if r else 0
+
+def search_users(query):
+    q = f"%{query}%"
+    return db_execute_all("""SELECT user_id, full_name, username, wallet FROM users WHERE full_name ILIKE %s OR username ILIKE %s OR CAST(user_id AS TEXT) LIKE %s ORDER BY joined_at DESC LIMIT 20""", (q, q, q))
+
+def fa_to_en(text):
+    return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+
+def set_state(uid, state, data=""):
+    db_execute("""INSERT INTO states (user_id, state, data) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO UPDATE SET state = EXCLUDED.state, data = EXCLUDED.data""", (uid, state, data))
+
+def get_state(uid):
+    r = db_execute("SELECT state, data FROM states WHERE user_id=%s", (uid,), fetch=True)
+    return (r[0], r[1]) if r else (None, "")
+
+def clear_state(uid):
+    db_execute("DELETE FROM states WHERE user_id=%s", (uid,))
 
 def is_admin(uid):
     return uid == ADMIN_ID
 
-def main_kb():
+async def check_membership(context, uid):
+    not_joined = []
+    for ch in REQUIRED_CHANNELS:
+        try:
+            member = await context.bot.get_chat_member(ch["id"], uid)
+            if member.status in ["left", "kicked"]: not_joined.append(ch)
+        except: not_joined.append(ch)
+    return not_joined
+    def main_kb(uid=None):
+    rows = [
+        [KeyboardButton("🛒 خرید میو پوینت")],
+        [KeyboardButton("💰 کیف پول"), KeyboardButton("📞 پشتیبانی")],
+        [KeyboardButton("👥 دعوت دوستان"), KeyboardButton("🤝 چطور اعتماد کنم")],
+        [KeyboardButton("📊 موجودی ما چقدره"), KeyboardButton("📖 راهنما")],
+    ]
+    if uid and is_admin(uid):
+        rows.append([KeyboardButton("🔐 پنل ادمین")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+def wallet_kb():
+    return ReplyKeyboardMarkup([[KeyboardButton("💳 شارژ کیف پول")], [KeyboardButton("🔙 بازگشت")]], resize_keyboard=True)
+
+def admin_kb():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📋 گروه‌های من")],
-        [KeyboardButton("➕ افزودن گروه جدید")]
+        [KeyboardButton("📢 پیام همگانی")], [KeyboardButton("👥 لیست کاربران")],
+        [KeyboardButton("💵 قیمت بالای 100"), KeyboardButton("💵 قیمت پایین 100")],
+        [KeyboardButton("💰 شارژ همه کاربران"), KeyboardButton("🎁 جایزه همه کاربران")],
+        [KeyboardButton("💸 کسر جایزه از همه کاربران")], [KeyboardButton("🔙 بازگشت")]
     ], resize_keyboard=True)
 
-def groups_kb(uid):
-    keyboard = []
-    groups = user_groups.get(uid, {})
-    for gid, gname in groups.items():
-        keyboard.append([KeyboardButton(f"📌 {gname}")])
-    keyboard.append([KeyboardButton("🔙 بازگشت")])
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-def actions_kb():
+def user_manage_kb(target_uid):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 ارسال پیام", callback_data="send_text")],
-        [InlineKeyboardButton("🎞 ارسال گیف", callback_data="send_gif")],
-        [InlineKeyboardButton("🖼 ارسال عکس", callback_data="send_photo")],
-        [InlineKeyboardButton("🎭 ارسال استیکر", callback_data="send_sticker")]
+        [InlineKeyboardButton("💰 شارژ کیف پول", callback_data=f"um_charge_{target_uid}")],
+        [InlineKeyboardButton("💸 کسر از کیف پول", callback_data=f"um_deduct_{target_uid}")],
+        [InlineKeyboardButton("👥 افزودن رفرال", callback_data=f"um_ref_{target_uid}")],
+        [InlineKeyboardButton("📊 اطلاعات کامل", callback_data=f"um_info_{target_uid}")],
+        [InlineKeyboardButton("📢 ارسال پیام", callback_data=f"um_msg_{target_uid}")],
+        [InlineKeyboardButton("📜 سفارش‌ها", callback_data=f"um_orders_{target_uid}")],
+        [InlineKeyboardButton("🎁 افزودن جایزه دعوت", callback_data=f"um_bonus_{target_uid}")],
+        [InlineKeyboardButton("📝 یادداشت شخصی", callback_data=f"um_note_{target_uid}")],
+        [InlineKeyboardButton("📊 تاریخچه تراکنش‌ها", callback_data=f"um_history_{target_uid}")],
+        [InlineKeyboardButton("🗑 حذف کاربر", callback_data=f"um_delete_{target_uid}")],
     ])
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        await update.message.reply_text("⛔ شما اجازه استفاده از این ربات را ندارید.")
-        return
-    user_states[uid] = None
-    await update.message.reply_text("سلام ادمین! به ربات مدیریت گروه خوش آمدی:", reply_markup=main_kb())
+def cancel_kb():
+    return ReplyKeyboardMarkup([[KeyboardButton("🔙 بازگشت")]], resize_keyboard=True)
 
-async def add_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid): return
-    user_states[uid] = "WAIT_GROUP_ID"
-    await update.message.reply_text("لطفا آیدی عددی گروه رو بفرست (مثلاً -1001234567890):\n\n⚠️ برای اینکه بتونم آیدی رو پیدا کنم، ربات باید تو گروه ادمین باشه و یه پیام تو گروه بفرست.")
+def join_kb(not_joined):
+    buttons = [[InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])] for ch in not_joined]
+    buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
+    return InlineKeyboardMarkup(buttons)
 
-async def receive_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid): return
-    
-    if user_states.get(uid) != "WAIT_GROUP_ID": 
-        return
-    
-    gid = update.message.text.strip()
-    
-    if gid.startswith("/") or gid in ["➕ افزودن گروه جدید", "📋 گروه‌های من", "🔙 بازگشت"]:
-        return
-        
-    try:
-        chat = await context.bot.get_chat(gid)
-        gname = chat.title or f"گروه {gid}"
-        if uid not in user_groups:
-            user_groups[uid] = {}
-        user_groups[uid][gid] = gname
-        await update.message.reply_text(f"✅ گروه {gname} با موفقیت ثبت شد.", reply_markup=main_kb())
-        user_states[uid] = None
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {e}\nمطمئن شو ربات تو گروه ادمینه و آیدی درسته (با -100 شروع میشه).")
+async def process_start_logic(update, context, uid, user):
+    is_new = not user_exists(uid)
+    pending = db_execute("SELECT ref_code FROM pending_refs WHERE user_id=%s", (uid,), fetch=True)
+    if is_new:
+        db_execute("INSERT INTO users (user_id, wallet, ref_code, full_name, username) VALUES (%s, 0, %s, %s, %s)", (uid, gen_ref_code(), user.full_name, user.username or ""))
+    else:
+        db_execute("UPDATE users SET full_name=%s, username=%s WHERE user_id=%s", (user.full_name, user.username or "", uid))
+    if pending:
+        ref_code = pending[0]
+        ref_owner = get_user_by_ref(ref_code)
+        if ref_owner:
+            ref_uid = ref_owner[0]
+            if ref_uid != uid:
+                already = db_execute("SELECT referred_by FROM users WHERE user_id=%s", (uid,), fetch=True)
+                if already and already[0] is None:
+                    db_execute("UPDATE users SET referred_by=%s WHERE user_id=%s", (ref_uid, uid))
+                    db_execute("UPDATE users SET referrals_count=referrals_count+1, total_reward=total_reward+%s WHERE user_id=%s", (REFERRAL_REWARD, ref_uid))
+                    add_transaction(ref_uid, REFERRAL_REWARD, "referral", f"دعوت کاربر {user.full_name}")
+                    try: await context.bot.send_message(ref_uid, f"👤 کاربر {user.full_name} با لینک شما وارد شد!\n🎁 {REFERRAL_REWARD:,} میوپوینت به جایزه‌های شما اضافه شد.")
+                    except: pass
+        db_execute("DELETE FROM pending_refs WHERE user_id=%s", (uid,))
+    clear_state(uid)
+    await context.bot.send_message(uid, "✅ عضویت شما تایید شد. با تشکر!\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=main_kb(uid))
 
-async def show_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     uid = update.effective_user.id
-    if not is_admin(uid): return
-    groups = user_groups.get(uid, {})
-    if not groups:
-        await update.message.reply_text("هنوز هیچ گروهی ثبت نکردی.", reply_markup=main_kb())
+    args = context.args
+    user = update.effective_user
+    if args and not user_exists(uid):
+        ref_code = args[0]
+        db_execute("INSERT INTO pending_refs (user_id, ref_code) VALUES (%s, %s) ON CONFLICT (user_id) DO UPDATE SET ref_code = EXCLUDED.ref_code", (uid, ref_code))
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        text = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined: text += f"📢 {ch['id']}\n"
+        text += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(text, reply_markup=join_kb(not_joined))
         return
-    await update.message.reply_text("یکی از گروه‌های زیر رو انتخاب کن:", reply_markup=groups_kb(uid))
-
-async def handle_group_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_admin(uid): return
+    await process_start_logic(update, context, uid, user)
+    async def menu_router(update, context):
     text = update.message.text
-    if text == "🔙 بازگشت":
-        user_states[uid] = None
-        await update.message.reply_text("به منوی اصلی برگشتی.", reply_markup=main_kb())
-        return
-    if text.startswith("📌 "):
-        gname = text.replace("📌 ", "")
-        groups = user_groups.get(uid, {})
-        gid = None
-        for k, v in groups.items():
-            if v == gname:
-                gid = k
-                break
-        if gid:
-            user_states[uid] = f"WAIT_ACTION|{gid}"
-            await update.message.reply_text(f"برای گروه «{gname}» چه کاری انجام بدم؟", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 بازگشت")]], resize_keyboard=True))
-            await context.bot.send_message(uid, "یکی از گزینه‌های زیر رو انتخاب کن:", reply_markup=actions_kb())
-
-async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    uid = query.from_user.id
-    if not is_admin(uid): return
-    await query.answer()
-    state = user_states.get(uid)
-    if not state or not state.startswith("WAIT_ACTION|"): return
-    
-    gid = state.split("|")[1]
-    action = query.data
-    
-    if action == "send_text":
-        user_states[uid] = f"WAIT_CONTENT|{gid}|text"
-        await query.edit_message_text("متن پیام رو بفرست:")
-    elif action == "send_gif":
-        user_states[uid] = f"WAIT_CONTENT|{gid}|gif"
-        await query.edit_message_text("گیف (GIF) رو بفرست:")
-    elif action == "send_photo":
-        user_states[uid] = f"WAIT_CONTENT|{gid}|photo"
-        await query.edit_message_text("عکس رو بفرست:")
-    elif action == "send_sticker":
-        user_states[uid] = f"WAIT_CONTENT|{gid}|sticker"
-        await query.edit_message_text("استیکر رو بفرست:")
-
-async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if not is_admin(uid): return
-    state = user_states.get(uid)
-    
-    if state == "WAIT_GROUP_ID":
+    not_joined = await check_membership(context, uid)
+    if not_joined:
+        txt = "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
+        for ch in not_joined: txt += f"📢 {ch['id']}\n"
+        txt += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
+        await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
         return
-        
-    if not state or not state.startswith("WAIT_CONTENT|"): return
-    
-    parts = state.split("|")
-    gid = parts[1]
-    content_type = parts[2]
-    
-    try:
-        if content_type == "text":
-            await context.bot.send_message(chat_id=gid, text=update.message.text)
-        elif content_type == "gif":
-            await context.bot.send_animation(chat_id=gid, animation=update.message.animation.file_id)
-        elif content_type == "photo":
-            await context.bot.send_photo(chat_id=gid, photo=update.message.photo[-1].file_id)
-        elif content_type == "sticker":
-            await context.bot.send_sticker(chat_id=gid, sticker=update.message.sticker.file_id)
-        
-        await update.message.reply_text("✅ با موفقیت به گروه ارسال شد.", reply_markup=main_kb())
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارسال: {e}")
-    
-    user_states[uid] = None
-
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.Regex("^➕ افزودن گروه جدید$"), add_group))
-app.add_handler(MessageHandler(filters.Regex("^📋 گروه‌های من$"), show_groups))
-app.add_handler(MessageHandler(filters.Regex("^📌 .*$"), handle_group_selection))
-app.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت$"), handle_group_selection))
-
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_group_id), group=1)
-
-app.add_handler(CallbackQueryHandler(action_callback, pattern="^send_"))
-app.add_handler(MessageHandler(filters.TEXT | filters.ANIMATION | filters.PHOTO | filters.Sticker.ALL, receive_content), group=2)
-
-app.run_polling()
+    state, data = get_state(uid)
+    if state == "ADMIN_REPLY": return await do_send_reply(update, context, uid, data)
+    if state == "WALLET_AMOUNT": return await do_wallet_amount(update, context, uid)
+    if state ==
