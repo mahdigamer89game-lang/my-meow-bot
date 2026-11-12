@@ -2,22 +2,15 @@ import os
 import math
 import asyncio
 import logging
-from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from decimal import Decimal
+from datetime import datetime
 
 import asyncpg
 from aiohttp import web
-from telegram import (
-    Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
-# ---------------------- تنظیمات ----------------------
 TOKEN = os.environ.get("TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "1713081033"))
@@ -37,7 +30,7 @@ MIN_REFERRALS = 5
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("meow-point")
 
-BUY_TIER, BUY_AMOUNT, SUPPORT_TEXT, TOPUP_RECEIPT, ADMIN_SEARCH = range(5)
+BUY_TIER, BUY_AMOUNT, SUPPORT_TEXT, ADMIN_SEARCH = range(4)
 
 MAIN_MENU = ReplyKeyboardMarkup([
     [KeyboardButton("🛒 خرید میو پوینت"), KeyboardButton("👛 کیف پول")],
@@ -53,21 +46,25 @@ ADMIN_MENU = ReplyKeyboardMarkup([
     [KeyboardButton("🎁 عملیات همگانی"), KeyboardButton("🏠 منوی اصلی")],
 ], resize_keyboard=True)
 
-# ---------------------- دیتابیس ----------------------
 async def init_db(pool):
     await pool.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY, username TEXT, first_name TEXT,
-        balance BIGINT NOT NULL DEFAULT 0, referral_code TEXT UNIQUE,
-        referred_by BIGINT REFERENCES users(user_id),
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        balance BIGINT NOT NULL DEFAULT 0,
+        referral_code TEXT UNIQUE,
+        referred_by BIGINT,
         referrals_count INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS balance BIGINT NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS topups (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id), receipt_file_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS tickets (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id), message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id), points BIGINT NOT NULL, amount_toman BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS withdrawals (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id), points BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS topups (id BIGSERIAL PRIMARY KEY, user_id BIGINT, receipt_file_id TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS tickets (id BIGSERIAL PRIMARY KEY, user_id BIGINT, message TEXT, status TEXT DEFAULT 'open', created_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, points BIGINT, amount_toman BIGINT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS withdrawals (id BIGSERIAL PRIMARY KEY, user_id BIGINT, points BIGINT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW());
     """)
     defaults = {"low_rate": str(DEFAULT_LOW_RATE), "high_rate": str(DEFAULT_HIGH_RATE), "inventory": "0"}
     for key, value in defaults.items():
@@ -78,16 +75,8 @@ async def setting(context, key):
     return row["value"] if row else "0"
 
 async def set_setting(context, key, value):
-    await context.application.bot_data["pool"].execute("""INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value""", key, str(value))
+    await context.application.bot_data["pool"].execute("INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", key, str(value))
 
-async def ensure_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user: return
-    pool = context.application.bot_data["pool"]
-    try:
-    await pool.execute("""INSERT INTO users(user_id, username, first_name, referral_code) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username, first_name=EXCLUDED.first_name""", user.id, user.username, user.first_name, str(user.id))
-except Exception:
-    pass
 async def is_admin(update):
     return bool(update.effective_user and update.effective_user.id == ADMIN_ID)
 
@@ -96,7 +85,7 @@ async def joined_channels(context, user_id):
         try:
             member = await context.bot.get_chat_member(channel, user_id)
             if member.status in ("left", "kicked"): return False
-        except Exception: return False
+        except: return False
     return True
 
 async def membership_gate(update, context):
@@ -113,23 +102,35 @@ async def membership_gate(update, context):
     return True
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await ensure_user(update, context)
+    user = update.effective_user
+    pool = context.application.bot_data["pool"]
+    
+    # بروزرسانی یا ساخت کاربر
+    try:
+        await pool.execute("""
+            INSERT INTO users(user_id, username, first_name, referral_code) 
+            VALUES($1,$2,$3,$4) 
+            ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
+        """, user.id, user.username, user.first_name, str(user.id))
+    except:
+        pass
+
+    # پردازش رفرال
     if context.args:
         try:
             referrer_id = int(context.args[0])
-            uid = update.effective_user.id
-            if referrer_id != uid:
-                pool = context.application.bot_data["pool"]
+            if referrer_id != user.id:
                 async with pool.acquire() as conn:
                     async with conn.transaction():
-                        me = await conn.fetchrow("SELECT referred_by FROM users WHERE user_id=$1 FOR UPDATE", uid)
+                        me = await conn.fetchrow("SELECT referred_by FROM users WHERE user_id=$1 FOR UPDATE", user.id)
                         ref = await conn.fetchrow("SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE", referrer_id)
                         if me and ref and me["referred_by"] is None:
-                            await conn.execute("UPDATE users SET referred_by=$1 WHERE user_id=$2", referrer_id, uid)
+                            await conn.execute("UPDATE users SET referred_by=$1 WHERE user_id=$2", referrer_id, user.id)
                             await conn.execute("UPDATE users SET referrals_count=referrals_count+1, balance=balance+$1 WHERE user_id=$2", REFERRAL_REWARD, referrer_id)
                             try: await context.bot.send_message(referrer_id, f"🎉 یک نفر با دعوت تو وارد شد؛ {REFERRAL_REWARD:,} میوپوینت دریافت کردی.")
                             except: pass
         except: pass
+
     if not await membership_gate(update, context): return
     await update.effective_message.reply_text(f"سلام {update.effective_user.first_name} 🌸\nبه ربات Meow Point خوش اومدی!", reply_markup=ADMIN_MENU if await is_admin(update) else MAIN_MENU)
 
@@ -140,15 +141,12 @@ async def check_join_callback(update, context):
         await query.edit_message_text("عضویتت تأیید شد. حالا /start رو بزن.")
     else: await query.answer("هنوز عضویت هر دو کانال تأیید نشده.", show_alert=True)
 
-async def menu_guard(update, context):
-    await ensure_user(update, context)
-    return await membership_gate(update, context)
-
 async def wallet(update, context):
-    if not await menu_guard(update, context): return
+    if not await membership_gate(update, context): return
     row = await context.application.bot_data["pool"].fetchrow("SELECT balance FROM users WHERE user_id=$1", update.effective_user.id)
+    bal = row["balance"] if row else 0
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("💳 شارژ کیف پول (ارسال رسید)", callback_data="topup_start")]])
-    await update.message.reply_text(f"👛 موجودی کیف پول: **{row['balance']:,}** میوپوینت", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    await update.message.reply_text(f"👛 موجودی کیف پول: **{bal:,}** میوپوینت", parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
 async def topup_start(update, context):
     q = update.callback_query
@@ -157,7 +155,7 @@ async def topup_start(update, context):
     await q.message.reply_text("لطفاً فقط تصویر رسید پرداخت را بفرست.\nپس از بررسی، ادمین کیف پولت را شارژ می‌کند.")
 
 async def receive_photo(update, context):
-    if not await menu_guard(update, context): return
+    if not await membership_gate(update, context): return
     if context.user_data.pop("awaiting_topup", False):
         photo = update.message.photo[-1]
         pool = context.application.bot_data["pool"]
@@ -190,7 +188,7 @@ async def topup_decision(update, context):
     await q.edit_message_caption(f"درخواست #{topup_id} بررسی شد: {action}")
 
 async def buy_start(update, context):
-    if not await menu_guard(update, context): return ConversationHandler.END
+    if not await membership_gate(update, context): return ConversationHandler.END
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("بالای ۱۰۰ میلیون", callback_data="tier:high")], [InlineKeyboardButton("پایین ۱۰۰ میلیون", callback_data="tier:low")]])
     await update.message.reply_text("نوع سفارش رو انتخاب کن:", reply_markup=kb)
     return BUY_TIER
@@ -239,7 +237,7 @@ async def wallet_pay(update, context):
     await context.bot.send_message(ADMIN_ID, f"🛒 سفارش جدید #{order_id}\nکاربر: {q.from_user.id}\nمقدار: {points:,}\nمبلغ: {price:,} تومان")
 
 async def support_start(update, context):
-    if not await menu_guard(update, context): return ConversationHandler.END
+    if not await membership_gate(update, context): return ConversationHandler.END
     await update.message.reply_text("پیامت رو برای پشتیبانی بنویس:")
     return SUPPORT_TEXT
 
@@ -251,12 +249,14 @@ async def support_text(update, context):
     return ConversationHandler.END
 
 async def referrals(update, context):
-    if not await menu_guard(update, context): return
+    if not await membership_gate(update, context): return
     user = update.effective_user
     me = await context.bot.get_me()
     row = await context.application.bot_data["pool"].fetchrow("SELECT referrals_count,balance FROM users WHERE user_id=$1", user.id)
+    ref_c = row["referrals_count"] if row else 0
+    bal = row["balance"] if row else 0
     link = f"https://t.me/{me.username}?start={user.id}"
-    await update.message.reply_text(f"👥 لینک دعوت اختصاصی تو:\n{link}\n\nتعداد دعوت‌ها: {row['referrals_count']}\nموجودی: {row['balance']:,} میوپوینت\nپاداش هر دعوت: {REFERRAL_REWARD:,}\nحداقل برداشت: {MIN_WITHDRAW_POINTS:,} میوپوینت\nحداقل تعداد دعوت: {MIN_REFERRALS}\n\nبرای ثبت درخواست برداشت، عبارت «درخواست برداشت» را بفرست.")
+    await update.message.reply_text(f"👥 لینک دعوت اختصاصی تو:\n{link}\n\nتعداد دعوت‌ها: {ref_c}\nموجودی: {bal:,} میوپوینت\nپاداش هر دعوت: {REFERRAL_REWARD:,}\nحداقل برداشت: {MIN_WITHDRAW_POINTS:,} میوپوینت\nحداقل تعداد دعوت: {MIN_REFERRALS}\n\nبرای ثبت درخواست برداشت، عبارت «درخواست برداشت» را بفرست.")
 
 async def withdrawal_request(update, context):
     pool = context.application.bot_data["pool"]
@@ -272,13 +272,13 @@ async def withdrawal_request(update, context):
     await update.message.reply_text("درخواست برداشت ثبت شد و پس از بررسی ادمین پیگیری می‌شود.")
 
 async def trust(update, context):
-    if await menu_guard(update, context): await update.message.reply_text("برای اطمینان، قبل از پرداخت قوانین و جزئیات سفارش را بررسی کن. رسیدها دستی بررسی می‌شوند و می‌توانی از بخش پشتیبانی پیگیری کنی.")
+    if await membership_gate(update, context): await update.message.reply_text("برای اطمینان، قبل از پرداخت قوانین و جزئیات سفارش را بررسی کن. رسیدها دستی بررسی می‌شوند و می‌توانی از بخش پشتیبانی پیگیری کنی.")
 
 async def help_text(update, context):
-    if await menu_guard(update, context): await update.message.reply_text("راهنما:\n۱) برای خرید، مقدار میوپوینت را وارد کن.\n۲) مبلغ به‌صورت خودکار محاسبه می‌شود.\n۳) برای شارژ کیف پول رسید پرداخت را ارسال کن.\n۴) از لینک دعوت برای دریافت پاداش استفاده کن.")
+    if await membership_gate(update, context): await update.message.reply_text("راهنما:\n۱) برای خرید، مقدار میوپوینت را وارد کن.\n۲) مبلغ به‌صورت خودکار محاسبه می‌شود.\n۳) برای شارژ کیف پول رسید پرداخت را ارسال کن.\n۴) از لینک دعوت برای دریافت پاداش استفاده کن.")
 
 async def inventory(update, context):
-    if await menu_guard(update, context):
+    if await membership_gate(update, context):
         value = int(await setting(context, "inventory"))
         await update.message.reply_text(f"📦 موجودی فعلی ما: {value:,} میوپوینت")
 
@@ -309,7 +309,7 @@ async def admin_search(update, context):
     if term.isdigit():
         rows = await pool.fetch("SELECT user_id,username,first_name,balance FROM users WHERE user_id=$1", int(term))
     else:
-        rows = await pool.fetch("""SELECT user_id,username,first_name,balance FROM users WHERE COALESCE(username,'') ILIKE $1 OR COALESCE(first_name,'') ILIKE $1 ORDER BY created_at DESC LIMIT 10""", f"%{term}%")
+        rows = await pool.fetch("SELECT user_id,username,first_name,balance FROM users WHERE COALESCE(username,'') ILIKE $1 OR COALESCE(first_name,'') ILIKE $1 ORDER BY created_at DESC LIMIT 10", f"%{term}%")
     if not rows: await update.message.reply_text("کاربری پیدا نشد."); return ConversationHandler.END
     for r in rows:
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("➕ شارژ ۱۰۰هزار", callback_data=f"adm_add:{r['user_id']}:100000"), InlineKeyboardButton("➖ کسر ۱۰۰هزار", callback_data=f"adm_sub:{r['user_id']}:100000")],[InlineKeyboardButton("✉️ پیام", callback_data=f"adm_msg:{r['user_id']}")]])
@@ -464,14 +464,9 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     application.add_error_handler(error_handler)
 
-    # FIX for Python 3.14 event loop error
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
