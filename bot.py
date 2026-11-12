@@ -21,7 +21,7 @@ from telegram.ext import (
 # Configuration: set these in Render -> Environment.
 # Never commit real tokens/passwords to source control.
 # ---------------------------------------------------------------------
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+BOT_TOKEN = os.environ["TOKEN"]
 DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 PAYMENT_CARD = os.environ.get("PAYMENT_CARD", "")
