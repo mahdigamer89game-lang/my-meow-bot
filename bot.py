@@ -124,6 +124,11 @@ async def receive_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid): return
     state = user_states.get(uid)
+    
+    # اگه کاربر منتظر آیدی گروه بود، این تابع کاری نکنه
+    if state == "WAIT_GROUP_ID":
+        return
+        
     if not state or not state.startswith("WAIT_CONTENT|"): return
     
     parts = state.split("|")
@@ -153,7 +158,11 @@ app.add_handler(MessageHandler(filters.Regex("^➕ افزودن گروه جدی�
 app.add_handler(MessageHandler(filters.Regex("^📋 گروه‌های من$"), show_groups))
 app.add_handler(MessageHandler(filters.Regex("^📌 .*$"), handle_group_selection))
 app.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت$"), handle_group_selection))
+
+# هندلر مخصوص دریافت آیدی گروه (قبل از دریافت محتوا قرار می‌گیرد)
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_group_id), group=1)
+
 app.add_handler(CallbackQueryHandler(action_callback, pattern="^send_"))
-app.add_handler(MessageHandler(filters.TEXT | filters.ANIMATION | filters.PHOTO | filters.Sticker.ALL, receive_content))
+app.add_handler(MessageHandler(filters.TEXT | filters.ANIMATION | filters.PHOTO | filters.Sticker.ALL, receive_content), group=2)
 
 app.run_polling()
