@@ -26,7 +26,6 @@ REQUIRED_CHANNELS = [
 
 logging.basicConfig(level=logging.INFO)
 connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
-
 def db_execute(query, params=None, fetch=False):
     conn = connection_pool.getconn()
     try:
@@ -59,29 +58,12 @@ def db_execute_all(query, params=None):
 
 def init_db():
     queries = [
-        """CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            wallet BIGINT DEFAULT 0,
-            ref_code VARCHAR(10) UNIQUE,
-            referred_by BIGINT,
-            referrals_count INTEGER DEFAULT 0,
-            total_reward BIGINT DEFAULT 0,
-            full_name TEXT,
-            username TEXT,
-            joined_at TIMESTAMP DEFAULT NOW(),
-            notes TEXT DEFAULT ''
-        )""",
-        """CREATE TABLE IF NOT EXISTS pending_charges (
-            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, photo_id TEXT, card_photo_id TEXT, status TEXT DEFAULT 'pending'
-        )""",
+        """CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, wallet BIGINT DEFAULT 0, ref_code VARCHAR(10) UNIQUE, referred_by BIGINT, referrals_count INTEGER DEFAULT 0, total_reward BIGINT DEFAULT 0, full_name TEXT, username TEXT, joined_at TIMESTAMP DEFAULT NOW(), notes TEXT DEFAULT '')""",
+        """CREATE TABLE IF NOT EXISTS pending_charges (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, photo_id TEXT, card_photo_id TEXT, status TEXT DEFAULT 'pending')""",
         """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
         """CREATE TABLE IF NOT EXISTS states (user_id BIGINT PRIMARY KEY, state TEXT, data TEXT)""",
-        """CREATE TABLE IF NOT EXISTS withdraw_requests (
-            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending'
-        )""",
-        """CREATE TABLE IF NOT EXISTS transactions (
-            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, type TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW()
-        )""",
+        """CREATE TABLE IF NOT EXISTS withdraw_requests (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending')""",
+        """CREATE TABLE IF NOT EXISTS transactions (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, type TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW())""",
         """CREATE TABLE IF NOT EXISTS pending_refs (user_id BIGINT PRIMARY KEY, ref_code VARCHAR(20))"""
     ]
     for q in queries:
@@ -89,7 +71,6 @@ def init_db():
         except Exception as e: logging.error(f"Init DB error: {e}")
 
 init_db()
-
 def get_setting(key, default):
     r = db_execute("SELECT value FROM settings WHERE key=%s", (key,), fetch=True)
     if r is None:
@@ -220,8 +201,7 @@ def join_kb(not_joined):
     buttons = [[InlineKeyboardButton(f"📢 عضویت در {ch['id']}", url=ch["link"])] for ch in not_joined]
     buttons.append([InlineKeyboardButton("✅ تلاش مجدد", callback_data="check_join")])
     return InlineKeyboardMarkup(buttons)
-
-async def process_start_logic(update, context, uid, user):
+    async def process_start_logic(update, context, uid, user):
     is_new = not user_exists(uid)
     pending = db_execute("SELECT ref_code FROM pending_refs WHERE user_id=%s", (uid,), fetch=True)
     if is_new:
@@ -347,8 +327,7 @@ async def menu_router(update, context):
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
-
-async def show_users_page(update, context, page):
+        async def show_users_page(update, context, page):
     total = get_users_count()
     users = get_users_page(page)
     total_pages = max(1, (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
@@ -418,8 +397,7 @@ async def do_deduct_user(update, context, uid, data):
     await update.message.reply_text(f"✅ {amount:,} از کاربر {target_uid} کسر شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
     try: await context.bot.send_message(target_uid, f"⚠️ {amount:,} میوپوینت از کیف پول شما کسر شد.\nموجودی: {new_bal:,}", reply_markup=main_kb(target_uid))
     except: pass
-
-async def do_bonus_user(update, context, uid, data):
+    async def do_bonus_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     try:
@@ -503,8 +481,7 @@ async def do_deduct_bonus_all(update, context, uid):
         except: pass
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.", reply_markup=admin_kb())
-
-async def do_withdraw_amount(update, context, uid):
+    async def do_withdraw_amount(update, context, uid):
     text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
     user = get_user(uid)
     total_reward = user[5]
@@ -867,3 +844,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+    
