@@ -9,8 +9,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 import psycopg2
 from psycopg2 import pool
 
-TOKEN = "8985946672:AAEE0OGCl9-et8VKhN_PmdGOWzgQ81xduC8"
-DATABASE_URL = "postgresql://meowuser:AnrVtkzHOf2bmKtYjDSLuOaRzwnvv9P8@dpg-dbmpbkbm8hqs73b3f560-a/meowbot_ot06"
+TOKEN = os.environ.get("TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_ID = 1713081033
 CARD_NUMBER = "5047061673513814"
 CARD_NAME = "صادقی"
@@ -59,24 +59,29 @@ def db_execute_all(query, params=None):
 
 def init_db():
     queries = [
-        """CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, wallet BIGINT DEFAULT 0, ref_code VARCHAR(10) UNIQUE, referred_by BIGINT, referrals_count INTEGER DEFAULT 0, total_reward BIGINT DEFAULT 0, full_name TEXT, username TEXT, joined_at TIMESTAMP DEFAULT NOW(), notes TEXT DEFAULT '')""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet BIGINT DEFAULT 0""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code VARCHAR(10) UNIQUE""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS referrals_count INTEGER DEFAULT 0""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS total_reward BIGINT DEFAULT 0""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS joined_at TIMESTAMP DEFAULT NOW()""",
-        """ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''""",
-        """CREATE TABLE IF NOT EXISTS pending_charges (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, photo_id TEXT, card_photo_id TEXT, status TEXT DEFAULT 'pending')""",
+        """CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            wallet BIGINT DEFAULT 0,
+            ref_code VARCHAR(10) UNIQUE,
+            referred_by BIGINT,
+            referrals_count INTEGER DEFAULT 0,
+            total_reward BIGINT DEFAULT 0,
+            full_name TEXT,
+            username TEXT,
+            joined_at TIMESTAMP DEFAULT NOW(),
+            notes TEXT DEFAULT ''
+        )""",
+        """CREATE TABLE IF NOT EXISTS pending_charges (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, photo_id TEXT, card_photo_id TEXT, status TEXT DEFAULT 'pending'
+        )""",
         """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
-        """INSERT INTO settings (key, value) VALUES ('price_high', '2100') ON CONFLICT (key) DO NOTHING""",
-        """INSERT INTO settings (key, value) VALUES ('price_low', '2500') ON CONFLICT (key) DO NOTHING""",
-        """INSERT INTO settings (key, value) VALUES ('threshold', '100') ON CONFLICT (key) DO NOTHING""",
         """CREATE TABLE IF NOT EXISTS states (user_id BIGINT PRIMARY KEY, state TEXT, data TEXT)""",
-        """CREATE TABLE IF NOT EXISTS withdraw_requests (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending')""",
-        """CREATE TABLE IF NOT EXISTS transactions (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, type TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW())""",
+        """CREATE TABLE IF NOT EXISTS withdraw_requests (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, card TEXT, status TEXT DEFAULT 'pending'
+        )""",
+        """CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, type TEXT, description TEXT, created_at TIMESTAMP DEFAULT NOW()
+        )""",
         """CREATE TABLE IF NOT EXISTS pending_refs (user_id BIGINT PRIMARY KEY, ref_code VARCHAR(20))"""
     ]
     for q in queries:
@@ -163,7 +168,8 @@ def clear_state(uid):
 
 def is_admin(uid):
     return uid == ADMIN_ID
-    async def check_membership(context, uid):
+
+async def check_membership(context, uid):
     not_joined = []
     for ch in REQUIRED_CHANNELS:
         try:
@@ -171,7 +177,6 @@ def is_admin(uid):
             if member.status in ["left", "kicked"]: not_joined.append(ch)
         except: not_joined.append(ch)
     return not_joined
-
 def main_kb(uid=None):
     rows = [
         [KeyboardButton("🛒 خرید میو پوینت")],
@@ -255,7 +260,7 @@ async def start(update, context):
         await update.message.reply_text(text, reply_markup=join_kb(not_joined))
         return
     await process_start_logic(update, context, uid, user)
-    async def menu_router(update, context):
+async def menu_router(update, context):
     text = update.message.text
     uid = update.effective_user.id
     not_joined = await check_membership(context, uid)
@@ -266,25 +271,26 @@ async def start(update, context):
         await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
         return
     state, data = get_state(uid)
+    if state == "ADMIN_REPLY": return await do_send_reply(update, context, uid, data)
     if state == "WALLET_AMOUNT": return await do_wallet_amount(update, context, uid)
+    if state == "ADMIN_BROADCAST": return await do_broadcast(update, context, uid)
+    if state == "ADMIN_SET_PRICE_HIGH": return await do_set_price(update, context, uid, "price_high")
+    if state == "ADMIN_SET_PRICE_LOW": return await do_set_price(update, context, uid, "price_low")
     if state == "SUPPORT_MESSAGE": return await do_support_message(update, context, uid)
     if state == "BUY_AMOUNT": return await do_buy_amount(update, context, uid, data)
     if state == "BUY_CARD": return await do_buy_card(update, context, uid, data)
     if state == "WITHDRAW_AMOUNT": return await do_withdraw_amount(update, context, uid)
     if state == "WITHDRAW_CARD": return await do_withdraw_card(update, context, uid, data)
-    if state == "ADMIN_MSG": return await do_admin_msg(update, context, uid, data)
-    if state == "ADMIN_CHARGE": return await do_admin_charge(update, context, uid, data)
-    if state == "ADMIN_DEDUCT": return await do_admin_deduct(update, context, uid, data)
-    if state == "ADMIN_REF": return await do_admin_ref(update, context, uid, data)
-    if state == "ADMIN_BONUS": return await do_admin_bonus(update, context, uid, data)
-    if state == "ADMIN_NOTE": return await do_admin_note(update, context, uid, data)
-    if state == "ADMIN_BROADCAST": return await do_broadcast(update, context, uid)
-    if state == "ADMIN_PRICE_HIGH": return await do_set_price(update, context, uid, "price_high")
-    if state == "ADMIN_PRICE_LOW": return await do_set_price(update, context, uid, "price_low")
+    if state == "ADMIN_SEARCH": return await do_search_user(update, context, uid)
+    if state == "ADMIN_MSG_USER": return await do_msg_user(update, context, uid, data)
+    if state == "ADMIN_CHARGE_USER": return await do_charge_user(update, context, uid, data)
+    if state == "ADMIN_DEDUCT_USER": return await do_deduct_user(update, context, uid, data)
+    if state == "ADMIN_BONUS_USER": return await do_bonus_user(update, context, uid, data)
+    if state == "ADMIN_NOTE_USER": return await do_note_user(update, context, uid, data)
+    if state == "ADMIN_REF_USER": return await do_add_ref_user(update, context, uid, data)
     if state == "ADMIN_CHARGE_ALL": return await do_charge_all(update, context, uid)
     if state == "ADMIN_BONUS_ALL": return await do_bonus_all(update, context, uid)
     if state == "ADMIN_DEDUCT_BONUS_ALL": return await do_deduct_bonus_all(update, context, uid)
-    if state == "ADMIN_SEARCH": return await do_search_user(update, context, uid)
 
     if text == "🛒 خرید میو پوینت":
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("بالای 100 میلیون", callback_data="cat_high")], [InlineKeyboardButton("پایین 100 میلیون", callback_data="cat_low")]])
@@ -307,7 +313,7 @@ async def start(update, context):
     elif text == "🤝 چطور اعتماد کنم":
         await update.message.reply_text("ما یک چنل داریم که در آن رضایت‌ها گذاشته می‌شوند\nhttps://t.me/Meow_Point_Free\n\nبرای دیدن رضایت‌ها در چنل سرچ کنید #رضایت\nو اگر سوالی داشتید در پی وی بگید @Goooorba1234", reply_markup=main_kb(uid))
     elif text == "📊 موجودی ما چقدره":
-        await update.message.reply_text("📊 موجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\nاما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.", reply_markup=main_kb(uid))
+        await update.message.reply_text("📊 موجودی ما چقدره؟\n\nموجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\nاما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.", reply_markup=main_kb(uid))
     elif text == "📖 راهنما":
         await update.message.reply_text("راهنمای خرید میوپوینت\n\nاول باید کیف پول را شارژ کنید\nوارد بخش کیف پول شوید و آن را شارژ کنید\nبعد از شارژ کردن به بخش خرید میو پوینت بروید\n\nاگر سوالی داشتید پی وی بگید @Goooorba1234", reply_markup=main_kb(uid))
     elif text == "🔐 پنل ادمین" and is_admin(uid):
@@ -333,82 +339,14 @@ async def start(update, context):
         set_state(uid, "ADMIN_BROADCAST")
         await update.message.reply_text("متن پیام همگانی را وارد کنید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت بالای 100" and is_admin(uid):
-        set_state(uid, "ADMIN_PRICE_HIGH")
+        set_state(uid, "ADMIN_SET_PRICE_HIGH")
         await update.message.reply_text(f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت پایین 100" and is_admin(uid):
-        set_state(uid, "ADMIN_PRICE_LOW")
+        set_state(uid, "ADMIN_SET_PRICE_LOW")
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
-        async def do_wallet_amount(update, context, uid):
-    text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
-    try:
-        amount = int(text)
-        if amount <= 0: raise ValueError
-    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
-    set_state(uid, "WALLET_CARD", str(amount))
-    await update.message.reply_text("برای اینکه فیشینگ اتفاق نیفته، اول عکس از کارتی که باهاش پرداخت می‌کنید را بفرستید.\n⚠️ توجه: اطلاعاتی مثل CVV2 نیاز نیست و فقط اسم و شماره کارت کافیه.")
-
-async def do_support_message(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("به منوی اصلی بازگشتید 👇", reply_markup=main_kb(uid))
-    user = update.effective_user
-    text = update.message.text
-    admin_text = f"💬 تیکت جدید\n\n🆔 آیدی: {uid}\n👤 نام: {user.full_name}\n🔗 یوزرنیم: @{user.username if user.username else 'ندارد'}\n\n📝 پیام:\n{text}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پاسخ", callback_data=f"reply_{uid}")]])
-    try: await context.bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
-    except: pass
-    clear_state(uid)
-    await update.message.reply_text("✅ پیام شما ارسال شد.", reply_markup=main_kb(uid))
-
-async def do_buy_amount(update, context, uid, cat):
-    text = fa_to_en(update.message.text.strip())
-    try:
-        amount = float(text)
-        if amount <= 0: raise ValueError
-    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
-    threshold = get_threshold()
-    if cat == "high" and amount < threshold: return await update.message.reply_text(f"لطفا مقدار بالای {threshold} میلیون وارد کنید.")
-    if cat == "low" and amount >= threshold: return await update.message.reply_text(f"لطفا مقدار پایین {threshold} میلیون وارد کنید.")
-    price = get_price_high() if cat == "high" else get_price_low()
-    total = int(amount * price)
-    set_state(uid, "BUY_CARD", f"{amount}|{total}")
-    await update.message.reply_text(f"✅ مقدار: {amount:g} میلیون\n💵 قیمت هر میلیون: {price:,} تومان\n💰 مبلغ کل: {total:,} تومان\n\nلطفا شماره کارت میویی خود را وارد کنید:")
-
-async def do_buy_card(update, context, uid, data):
-    card = update.message.text.strip()
-    parts = data.split("|")
-    amount = float(parts[0])
-    total = int(parts[1])
-    set_state(uid, "BUY_PAY", f"{card}|{amount}|{total}")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("💳 پرداخت با کیف پول", callback_data="pay_wallet")]])
-    await update.message.reply_text(f"شماره کارت شما ثبت شد: {card}\nمبلغ قابل پرداخت: {total:,} تومان\n\nبرای پرداخت روی دکمه زیر بزنید:", reply_markup=kb)
-
-async def do_withdraw_amount(update, context, uid):
-    text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
-    user = get_user(uid)
-    total_reward = user[5]
-    try:
-        amount = int(text)
-        if amount < MIN_WITHDRAW: return await update.message.reply_text(f"لطفا مقدار بالای {MIN_WITHDRAW:,} وارد کنید.")
-        if amount > total_reward: return await update.message.reply_text(f"❌ مقدار درخواست از مجموع جایزه‌های شما ({total_reward:,}) بیشتره.")
-    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
-    set_state(uid, "WITHDRAW_CARD", str(amount))
-    await update.message.reply_text("لطفا شماره کارت خود را وارد کنید:")
-
-async def do_withdraw_card(update, context, uid, data):
-    card = update.message.text.strip()
-    amount = int(data)
-    user = get_user(uid)
-    ref_count = user[4]
-    db_execute("UPDATE users SET referrals_count = GREATEST(referrals_count - %s, 0), total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s", (MIN_REFERRALS, amount, uid))
-    db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (uid, -amount, "sub", "دریافت جایزه دعوت"))
-    db_execute("INSERT INTO withdraw_requests (user_id, amount, card) VALUES (%s, %s, %s)", (uid, amount, card))
-    clear_state(uid)
-    await update.message.reply_text("✅ درخواست شما ثبت شد.", reply_markup=main_kb(uid))
-    admin_text = f"💰 درخواست دریافت جایزه\n\n🆔 آیدی: {uid}\n👤 نام: {update.effective_user.full_name}\n💵 مقدار: {amount:,} میوپوینت\n💳 کارت: {card}"
-    try: await context.bot.send_message(ADMIN_ID, admin_text)
-    except: pass
-        async def show_users_page(update, context, page):
+async def show_users_page(update, context, page):
     total = get_users_count()
     users = get_users_page(page)
     total_pages = max(1, (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE)
@@ -443,7 +381,7 @@ async def do_search_user(update, context, uid):
     await update.message.reply_text(text, reply_markup=kb)
     await update.message.reply_text("برای بازگشت:", reply_markup=admin_kb())
 
-async def do_admin_msg(update, context, uid, data):
+async def do_msg_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     text = update.message.text
@@ -453,7 +391,7 @@ async def do_admin_msg(update, context, uid, data):
     except Exception as e: await update.message.reply_text(f"❌ خطا: {e}", reply_markup=admin_kb())
     clear_state(uid)
 
-async def do_admin_charge(update, context, uid, data):
+async def do_charge_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     try:
@@ -465,7 +403,8 @@ async def do_admin_charge(update, context, uid, data):
     await update.message.reply_text(f"✅ {amount:,} به کاربر {target_uid} اضافه شد.\nموجودی: {new_bal:,}", reply_markup=admin_kb())
     try: await context.bot.send_message(target_uid, f"🎁 {amount:,} میوپوینت به کیف پول شما اضافه شد!\nموجودی جدید: {new_bal:,}", reply_markup=main_kb(target_uid))
     except: pass
-        async def do_admin_deduct(update, context, uid, data):
+
+async def do_deduct_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     try:
@@ -478,18 +417,7 @@ async def do_admin_charge(update, context, uid, data):
     try: await context.bot.send_message(target_uid, f"⚠️ {amount:,} میوپوینت از کیف پول شما کسر شد.\nموجودی: {new_bal:,}", reply_markup=main_kb(target_uid))
     except: pass
 
-async def do_admin_ref(update, context, uid, data):
-    target_uid = int(data)
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
-    try:
-        count = int(fa_to_en(update.message.text.strip()).replace(",", ""))
-        if count <= 0: raise ValueError
-    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
-    db_execute("UPDATE users SET referrals_count = referrals_count + %s WHERE user_id=%s", (count, target_uid))
-    clear_state(uid)
-    await update.message.reply_text(f"✅ {count} رفرال به کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
-
-async def do_admin_bonus(update, context, uid, data):
+async def do_bonus_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     try:
@@ -501,38 +429,24 @@ async def do_admin_bonus(update, context, uid, data):
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} به جایزه‌های کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
 
-async def do_admin_note(update, context, uid, data):
+async def do_add_ref_user(update, context, uid, data):
+    target_uid = int(data)
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+    try:
+        count = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if count <= 0: raise ValueError
+    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+    db_execute("UPDATE users SET referrals_count = referrals_count + %s WHERE user_id=%s", (count, target_uid))
+    clear_state(uid)
+    await update.message.reply_text(f"✅ {count} رفرال به کاربر {target_uid} اضافه شد.", reply_markup=admin_kb())
+
+async def do_note_user(update, context, uid, data):
     target_uid = int(data)
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
     note = update.message.text
     db_execute("UPDATE users SET notes=%s WHERE user_id=%s", (note, target_uid))
     clear_state(uid)
     await update.message.reply_text(f"✅ یادداشت ذخیره شد.", reply_markup=admin_kb())
-
-async def do_broadcast(update, context, uid):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
-    text = update.message.text
-    users = get_all_users()
-    sent, failed = 0, 0
-    await update.message.reply_text(f"در حال ارسال به {len(users)} کاربر...")
-    for u in users:
-        try:
-            await context.bot.send_message(u, f"📢 اطلاعیه:\n\n{text}")
-            sent += 1
-        except: failed += 1
-    clear_state(uid)
-    await update.message.reply_text(f"✅ ارسال شد به {sent}\n❌ ناموفق: {failed}", reply_markup=admin_kb())
-
-async def do_set_price(update, context, uid, key):
-    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
-    try:
-        val = int(fa_to_en(update.message.text.strip()).replace(",", ""))
-        if val <= 0: raise ValueError
-    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
-    set_setting(key, val)
-    clear_state(uid)
-    title = "بالای 100" if key == "price_high" else "پایین 100"
-    await update.message.reply_text(f"✅ قیمت {title} به {val:,} تومان تغییر کرد.", reply_markup=admin_kb())
 
 async def do_charge_all(update, context, uid):
     if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
@@ -587,7 +501,114 @@ async def do_deduct_bonus_all(update, context, uid):
         except: pass
     clear_state(uid)
     await update.message.reply_text(f"✅ {amount:,} میوپوینت از جایزه‌های {success} کاربر کسر شد.", reply_markup=admin_kb())
-    async def on_callback(update, context):
+
+async def do_withdraw_amount(update, context, uid):
+    text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
+    user = get_user(uid)
+    total_reward = user[5]
+    try:
+        amount = int(text)
+        if amount < MIN_WITHDRAW: return await update.message.reply_text(f"لطفا مقدار بالای {MIN_WITHDRAW:,} وارد کنید.")
+        if amount > total_reward: return await update.message.reply_text(f"❌ مقدار درخواست از مجموع جایزه‌های شما ({total_reward:,}) بیشتره.")
+    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+    set_state(uid, "WITHDRAW_CARD", str(amount))
+    await update.message.reply_text("لطفا شماره کارت خود را وارد کنید:")
+
+async def do_withdraw_card(update, context, uid, data):
+    card = update.message.text.strip()
+    amount = int(data)
+    user = get_user(uid)
+    ref_count = user[4]
+    db_execute("UPDATE users SET referrals_count = GREATEST(referrals_count - %s, 0), total_reward = GREATEST(total_reward - %s, 0) WHERE user_id=%s", (MIN_REFERRALS, amount, uid))
+    db_execute("INSERT INTO transactions (user_id, amount, type, description) VALUES (%s, %s, %s, %s)", (uid, -amount, "sub", "دریافت جایزه دعوت"))
+    db_execute("INSERT INTO withdraw_requests (user_id, amount, card) VALUES (%s, %s, %s)", (uid, amount, card))
+    r = db_execute("SELECT id FROM withdraw_requests WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,), fetch=True)
+    req_id = r[0]
+    clear_state(uid)
+    await update.message.reply_text("✅ درخواست شما ثبت شد.", reply_markup=main_kb(uid))
+    admin_text = f"💰 درخواست دریافت جایزه\n\n🆔 آیدی: {uid}\n👤 نام: {update.effective_user.full_name}\n🔗 یوزرنیم: @{update.effective_user.username if update.effective_user.username else 'ندارد'}\n👥 تعداد دعوت قبل: {ref_count}\n💵 مقدار: {amount:,} میوپوینت\n💳 کارت: {card}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ واریز شد", callback_data=f"paid_{req_id}_{uid}")]])
+    try: await context.bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
+    except Exception as e: logging.error(e)
+
+async def do_broadcast(update, context, uid):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+    text = update.message.text
+    users = get_all_users()
+    sent, failed = 0, 0
+    await update.message.reply_text(f"در حال ارسال به {len(users)} کاربر...")
+    for u in users:
+        try:
+            await context.bot.send_message(u, f"📢 اطلاعیه:\n\n{text}")
+            sent += 1
+        except: failed += 1
+    clear_state(uid)
+    await update.message.reply_text(f"✅ ارسال شد به {sent}\n❌ ناموفق: {failed}", reply_markup=admin_kb())
+
+async def do_set_price(update, context, uid, key):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("لغو شد.", reply_markup=admin_kb())
+    try:
+        val = int(fa_to_en(update.message.text.strip()).replace(",", ""))
+        if val <= 0: raise ValueError
+    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+    set_setting(key, val)
+    clear_state(uid)
+    title = "بالای 100" if key == "price_high" else "پایین 100"
+    await update.message.reply_text(f"✅ قیمت {title} به {val:,} تومان تغییر کرد.", reply_markup=admin_kb())
+
+async def do_support_message(update, context, uid):
+    if update.message.text == "🔙 بازگشت": clear_state(uid); return await update.message.reply_text("به منوی اصلی بازگشتید 👇", reply_markup=main_kb(uid))
+    user = update.effective_user
+    text = update.message.text
+    admin_text = f"💬 تیکت جدید\n\n🆔 آیدی: {uid}\n👤 نام: {user.full_name}\n🔗 یوزرنیم: @{user.username if user.username else 'ندارد'}\n\n📝 پیام:\n{text}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پاسخ", callback_data=f"reply_{uid}")]])
+    try: await context.bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
+    except Exception as e: logging.error(e)
+    clear_state(uid)
+    await update.message.reply_text("✅ پیام شما ارسال شد.", reply_markup=main_kb(uid))
+
+async def do_send_reply(update, context, uid, data):
+    target_uid = int(data)
+    text = update.message.text
+    try:
+        await context.bot.send_message(target_uid, f"📩 پاسخ پشتیبانی:\n\n{text}", reply_markup=main_kb(target_uid))
+        await update.message.reply_text(f"✅ پاسخ ارسال شد.", reply_markup=main_kb(uid))
+    except Exception as e: await update.message.reply_text(f"❌ خطا: {e}")
+    clear_state(uid)
+
+async def do_buy_amount(update, context, uid, cat):
+    text = fa_to_en(update.message.text.strip())
+    try:
+        amount = float(text)
+        if amount <= 0: raise ValueError
+    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+    threshold = get_threshold()
+    if cat == "high" and amount < threshold: return await update.message.reply_text(f"لطفا مقدار بالای {threshold} میلیون وارد کنید.")
+    if cat == "low" and amount >= threshold: return await update.message.reply_text(f"لطفا مقدار پایین {threshold} میلیون وارد کنید.")
+    price = get_price_high() if cat == "high" else get_price_low()
+    total = int(amount * price)
+    set_state(uid, "BUY_CARD", f"{amount}|{total}")
+    await update.message.reply_text(f"✅ مقدار: {amount:g} میلیون\n💵 قیمت هر میلیون: {price:,} تومان\n💰 مبلغ کل: {total:,} تومان\n\nلطفا شماره کارت میویی خود را وارد کنید:")
+
+async def do_buy_card(update, context, uid, data):
+    card = update.message.text.strip()
+    parts = data.split("|")
+    amount = float(parts[0])
+    total = int(parts[1])
+    set_state(uid, "BUY_PAY", f"{card}|{amount}|{total}")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("💳 پرداخت با کیف پول", callback_data="pay_wallet")]])
+    await update.message.reply_text(f"شماره کارت شما ثبت شد: {card}\nمبلغ قابل پرداخت: {total:,} تومان\n\nبرای پرداخت روی دکمه زیر بزنید:", reply_markup=kb)
+
+async def do_wallet_amount(update, context, uid):
+    text = fa_to_en(update.message.text.strip()).replace(",", "").replace("،", "")
+    try:
+        amount = int(text)
+        if amount <= 0: raise ValueError
+    except: return await update.message.reply_text("لطفا یک عدد معتبر وارد کنید.")
+    set_state(uid, "WALLET_CARD", str(amount))
+    await update.message.reply_text("برای اینکه فیشینگ اتفاق نیفته، اول عکس از کارتی که باهاش پرداخت می‌کنید را بفرستید.\n⚠️ توجه: اطلاعاتی مثل CVV2 نیاز نیست و فقط اسم و شماره کارت کافیه.")
+
+async def on_callback(update, context):
     query = update.callback_query
     data = query.data
     uid = query.from_user.id
@@ -600,36 +621,6 @@ async def do_deduct_bonus_all(update, context, uid):
             await process_start_logic(update, context, uid, query.from_user)
             try: await query.delete()
             except: pass
-    elif data == "cat_high":
-        await query.answer()
-        set_state(uid, "BUY_AMOUNT", "high")
-        await query.edit_message_text("شما «بالای 100 میلیون» را انتخاب کردید.\nحالا مقدار را به میلیون وارد کنید:")
-    elif data == "cat_low":
-        await query.answer()
-        set_state(uid, "BUY_AMOUNT", "low")
-        await query.edit_message_text("شما «پایین 100 میلیون» را انتخاب کردید.\nحالا مقدار را به میلیون وارد کنید:")
-    elif data == "pay_wallet":
-        await query.answer()
-        state, d = get_state(uid)
-        if state != "BUY_PAY": return await query.edit_message_text("❌ خطا.")
-        parts = d.split("|")
-        card, amount, total = parts[0], float(parts[1]), int(parts[2])
-        bal = get_wallet(uid)
-        if bal < total:
-            await query.edit_message_text(f"❌ موجودی کافی نیست.\nموجودی: {bal:,}")
-            clear_state(uid)
-            return
-        new_bal = add_wallet(uid, -total, f"خرید {amount:g} میلیون میو")
-        admin_text = f"🛒 سفارش جدید\n\n🆔 آیدی: {uid}\n👤 نام: {query.from_user.full_name}\n💳 کارت میویی: {card}\n📊 مقدار: {amount:g} میلیون\n💰 مبلغ: {total:,} تومان\n💼 موجودی: {new_bal:,}"
-        try: await context.bot.send_message(ADMIN_ID, admin_text)
-        except: pass
-        await query.edit_message_text(f"✅ پرداخت انجام شد.\nموجودی جدید: {new_bal:,}\n\nسفارش ثبت شد.")
-        await context.bot.send_message(uid, "به منوی اصلی بازگشتید 👇", reply_markup=main_kb(uid))
-        clear_state(uid)
-    elif data == "withdraw":
-        await query.answer()
-        set_state(uid, "WITHDRAW_AMOUNT")
-        await query.message.reply_text(f"مقدار درخواست را وارد کنید:\n(حداقل {MIN_WITHDRAW:,} میوپوینت)")
     elif data.startswith("users_page_"):
         await query.answer()
         if not is_admin(uid): return
@@ -654,37 +645,37 @@ async def do_deduct_bonus_all(update, context, uid):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_charge_", ""))
-        set_state(uid, "ADMIN_CHARGE", str(target_uid))
+        set_state(uid, "ADMIN_CHARGE_USER", str(target_uid))
         await query.message.reply_text(f"💰 مقدار شارژ برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_deduct_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_deduct_", ""))
-        set_state(uid, "ADMIN_DEDUCT", str(target_uid))
+        set_state(uid, "ADMIN_DEDUCT_USER", str(target_uid))
         await query.message.reply_text(f"💸 مقدار کسر از کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_ref_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_ref_", ""))
-        set_state(uid, "ADMIN_REF", str(target_uid))
+        set_state(uid, "ADMIN_REF_USER", str(target_uid))
         await query.message.reply_text(f"👥 تعداد رفرال برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_msg_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_msg_", ""))
-        set_state(uid, "ADMIN_MSG", str(target_uid))
+        set_state(uid, "ADMIN_MSG_USER", str(target_uid))
         await query.message.reply_text(f"📢 متن پیام برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_bonus_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_bonus_", ""))
-        set_state(uid, "ADMIN_BONUS", str(target_uid))
+        set_state(uid, "ADMIN_BONUS_USER", str(target_uid))
         await query.message.reply_text(f"🎁 مقدار جایزه دعوت برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_note_"):
         await query.answer()
         if not is_admin(uid): return
         target_uid = int(data.replace("um_note_", ""))
-        set_state(uid, "ADMIN_NOTE", str(target_uid))
+        set_state(uid, "ADMIN_NOTE_USER", str(target_uid))
         await query.message.reply_text(f"📝 یادداشت برای کاربر {target_uid}:", reply_markup=cancel_kb())
     elif data.startswith("um_info_"):
         await query.answer()
@@ -721,21 +712,88 @@ async def do_deduct_bonus_all(update, context, uid):
         db_execute("DELETE FROM transactions WHERE user_id=%s", (target_uid,))
         db_execute("DELETE FROM pending_refs WHERE user_id=%s", (target_uid,))
         await query.message.reply_text(f"🗑 کاربر {target_uid} حذف شد.")
+    elif data == "cat_high":
+        await query.answer()
+        set_state(uid, "BUY_AMOUNT", "high")
+        await query.edit_message_text("شما «بالای 100 میلیون» را انتخاب کردید.\nحالا مقدار را به میلیون وارد کنید:")
+    elif data == "cat_low":
+        await query.answer()
+        set_state(uid, "BUY_AMOUNT", "low")
+        await query.edit_message_text("شما «پایین 100 میلیون» را انتخاب کردید.\nحالا مقدار را به میلیون وارد کنید:")
+    elif data == "pay_wallet":
+        await query.answer()
+        await do_pay_wallet(query, context, uid)
+    elif data == "withdraw":
+        await query.answer()
+        get_wallet(uid)
+        user = get_user(uid)
+        ref_count = user[4]
+        if ref_count < MIN_REFERRALS: return await query.message.reply_text(f"❌ رفرال‌ها کم هستند.\nشما {ref_count} دعوت دارید. حداقل {MIN_REFERRALS} دعوت لازم است.")
+        set_state(uid, "WITHDRAW_AMOUNT")
+        await query.message.reply_text(f"مقدار درخواست را وارد کنید:\n(حداقل {MIN_WITHDRAW:,} میوپوینت)")
+    elif data.startswith("deliver_"):
+        await query.answer()
+        if not is_admin(uid): return await query.answer("فقط ادمین", show_alert=True)
+        target_uid = int(data.replace("deliver_", ""))
+        try:
+            await context.bot.send_message(target_uid, "✅ میو پوینت شما واریز شد!\n\nاز خرید شما متشکریم. 🌸")
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(f"✅ پیام واریز به کاربر {target_uid} ارسال شد.")
+        except Exception as e: await query.message.reply_text(f"❌ خطا: {e}")
+    elif data.startswith("paid_"):
+        await query.answer()
+        if not is_admin(uid): return
+        parts = data.replace("paid_", "").split("_")
+        req_id = int(parts[0])
+        target_uid = int(parts[1])
+        r = db_execute("SELECT amount FROM withdraw_requests WHERE id=%s", (req_id,), fetch=True)
+        if r:
+            amount = r[0]
+            try:
+                await context.bot.send_message(target_uid, f"✅ جایزه {amount:,} میوپوینت شما واریز شد!")
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.message.reply_text(f"✅ پیام به کاربر {target_uid} ارسال شد.")
+            except Exception as e: logging.error(e)
+    elif data.startswith("reply_"):
+        await query.answer()
+        if not is_admin(uid): return
+        target_uid = int(data.replace("reply_", ""))
+        set_state(uid, "ADMIN_REPLY", str(target_uid))
+        await query.message.reply_text(f"✍️ پاسخ خود را بنویسید:")
+    elif data.startswith("charge_ok_"):
+        await do_charge(query, context, data, True)
+    elif data.startswith("charge_no_"):
+        await do_charge(query, context, data, False)
     else:
         await query.answer()
 
-async def do_charge_callback(update, context):
-    query = update.callback_query
-    data = query.data
-    await query.answer()
-    if not is_admin(query.from_user.id): return
-    action = "approve" if data.startswith("charge_ok_") else "reject"
-    charge_id = int(data.split("_")[-1])
-    row = db_execute("SELECT user_id, amount, status FROM pending_charges WHERE id=%s", (charge_id,), fetch=True)
-    if not row: return await query.edit_message_caption("یافت نشد.")
-    uid, amount, status = row
-    if status != "pending": return await query.edit_message_caption("قبلا پردازش شده.")
-    if action == "approve":
+async def do_pay_wallet(query, context, uid):
+    state, data = get_state(uid)
+    if state != "BUY_PAY": return await query.edit_message_text("❌ خطا: لطفا دوباره از ابتدا تلاش کنید.")
+    parts = data.split("|")
+    card, amount, total = parts[0], float(parts[1]), int(parts[2])
+    bal = get_wallet(uid)
+    if bal < total:
+        await query.edit_message_text(f"❌ موجودی کافی نمیباشد.\nموجودی: {bal:,}\nمبلغ لازم: {total:,}")
+        clear_state(uid)
+        return
+    new_bal = add_wallet(uid, -total, f"خرید {amount:g} میلیون میو")
+    admin_text = f"🛒 سفارش جدید\n\n🆔 آیدی: {uid}\n👤 نام: {query.from_user.full_name}\n💳 کارت میویی: {card}\n📊 مقدار: {amount:g} میلیون\n💰 مبلغ: {total:,} تومان\n💼 موجودی: {new_bal:,}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ واریز شد", callback_data=f"deliver_{uid}")]])
+    try: await context.bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
+    except Exception as e: logging.error(e)
+    await query.edit_message_text(f"✅ پرداخت انجام شد.\nمبلغ {total:,} از کیف پول کسر شد.\nموجودی جدید: {new_bal:,}\n\nسفارش ثبت شد.")
+    await context.bot.send_message(uid, "به منوی اصلی بازگشتید 👇", reply_markup=main_kb(uid))
+    clear_state(uid)
+
+async def do_charge(query, context, data, approve):
+    if approve: charge_id = int(data.replace("charge_ok_", ""))
+    else: charge_id = int(data.replace("charge_no_", ""))
+    row = db_execute("SELECT user_id, amount, card_photo_id, status FROM pending_charges WHERE id=%s", (charge_id,), fetch=True)
+    if not row: return await query.answer("یافت نشد.", show_alert=True)
+    uid, amount, card_photo_id, status = row
+    if status != "pending": return await query.answer("قبلا پردازش شده.", show_alert=True)
+    if approve:
         add_wallet(uid, amount, "شارژ کیف پول")
         db_execute("UPDATE pending_charges SET status='approved' WHERE id=%s", (charge_id,))
         await query.edit_message_caption(f"✅ تایید شد — {amount:,} به کاربر {uid} اضافه شد.")
@@ -746,14 +804,6 @@ async def do_charge_callback(update, context):
         await query.edit_message_caption(f"❌ رد شد — درخواست شارژ کاربر {uid} رد شد.")
         try: await context.bot.send_message(uid, "❌ رسید شما تایید نشد.", reply_markup=main_kb(uid))
         except: pass
-
-async def do_reply_callback(update, context):
-    query = update.callback_query
-    await query.answer()
-    if not is_admin(query.from_user.id): return
-    target_uid = int(query.data.replace("reply_", ""))
-    set_state(query.from_user.id, "ADMIN_REPLY", str(target_uid))
-    await query.message.reply_text(f"✍️ پاسخ خود را برای کاربر {target_uid} بنویسید:")
 
 async def on_photo(update, context):
     uid = update.effective_user.id
@@ -779,6 +829,21 @@ async def on_photo(update, context):
         except Exception as e: logging.error(e)
         return
 
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(on_callback))
+app.add_handler(MessageHandler(filters.PHOTO, on_photo))
+
+async def state_router(update, context):
+    uid = update.effective_user.id
+    state, data = get_state(uid)
+    if state == "WAIT_DIAMOND_MIO": return
+    if state == "WAIT_MIO_CARD": return
+    if state == "WAIT_DIAMOND_MONEY": return
+    if state == "WAIT_2FA": return
+    return await menu_router(update, context)
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, state_router))
+
 async def start_web_server():
     async def handle(request): return web.Response(text="Bot is running ✅")
     web_app = web.Application()
@@ -790,14 +855,6 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(on_callback))
-app.add_handler(CallbackQueryHandler(do_charge_callback, pattern="^charge_"))
-app.add_handler(CallbackQueryHandler(do_reply_callback, pattern="^reply_"))
-app.add_handler(MessageHandler(filters.PHOTO, on_photo))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
-
 async def main():
     await start_web_server()
     async with app:
@@ -807,7 +864,4 @@ async def main():
         while True: await asyncio.sleep(3600)
 
 if __name__ == '__main__':
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     asyncio.run(main())
