@@ -1,10 +1,5 @@
-import asyncio
-import logging
-import os
-import random
-import string
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import psycopg2
 from psycopg2 import pool
@@ -180,10 +175,10 @@ async def check_membership(context, uid):
 def main_kb(uid=None):
     rows = [
         [KeyboardButton("🛒 خرید میو پوینت")],
+        [KeyboardButton("🛍 فروشگاه (مینی اپ)")],
         [KeyboardButton("💰 کیف پول"), KeyboardButton("📞 پشتیبانی")],
         [KeyboardButton("👥 دعوت دوستان"), KeyboardButton("🤝 چطور اعتماد کنم")],
         [KeyboardButton("📊 موجودی ما چقدره"), KeyboardButton("📖 راهنما")],
-        [KeyboardButton("🛍 فروشگاه (مینی اپ)")]
     ]
     if uid and is_admin(uid):
         rows.append([KeyboardButton("🔐 پنل ادمین")])
@@ -350,12 +345,15 @@ async def menu_router(update, context):
     elif text == "💵 قیمت بالای 100" and is_admin(uid):
         set_state(uid, "ADMIN_PRICE_HIGH")
         await update.message.reply_text(f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
-    elif text == "💵 قیمت پایین 100" and is_admin(uid):
+    elif  text == "💵 قیمت پایین 100" and is_admin(uid):
         set_state(uid, "ADMIN_PRICE_LOW")
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
-    else:
-        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
-    await update.message.reply_text("برای ورود به فروشگاه روی دکمه زیر بزنید:", reply_markup=kb)
+    elif text == "🛍 فروشگاه (مینی اپ)":
+        web_app_url = "https://my-meow-bot.ofs4.onrender.com/app"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("باز کردن فروشگاه", web_app=WebAppInfo(url=web_app_url))]
+        ])
+        await update.message.reply_text("برای ورود به فروشگاه روی دکمه زیر بزنید:", reply_markup=kb)
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
 async def show_users_page(update, context, page):
@@ -860,7 +858,6 @@ async def start_web_server():
     async def handle(request): 
         return web.Response(text="Bot is running ✅")
 
-    # 1. API برای گرفتن موجودی کاربر
     async def api_get_user(request):
         try:
             uid = int(request.query.get('user_id', 0))
@@ -869,7 +866,6 @@ async def start_web_server():
         except Exception as e:
             return web.json_response({"error": str(e)}, status=400)
 
-    # 2. API برای ثبت سفارش
     async def api_buy(request):
         try:
             data = await request.json()
@@ -889,14 +885,11 @@ async def start_web_server():
         except Exception as e:
             return web.json_response({"status": "error", "message": str(e)}, status=400)
 
-    # 3. تنظیم وب‌سرور و اضافه کردن APIها
     web_app = web.Application()
     web_app.router.add_get('/', handle)
     web_app.router.add_route('*', '/ping', handle)
     web_app.router.add_get('/api/user', api_get_user)
     web_app.router.add_post('/api/buy', api_buy)
-    
-    # 4. سرو کردن فایل index.html
     web_app.router.add_get('/index.html', lambda r: web.FileResponse('index.html'))
     web_app.router.add_get('/app', lambda r: web.FileResponse('index.html'))
 
@@ -905,7 +898,6 @@ async def start_web_server():
     port = int(os.environ.get('PORT', 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-
 async def main():
     await start_web_server()
     async with app:
