@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>فروشگاه میو پوینت</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #17212b;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background-color: #232e3c;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        h2 {
+            color: #64b5f6;
+            margin-bottom: 20px;
+        }
+        .balance {
+            font-size: 18px;
+            margin-bottom: 20px;
+            background-color: #1c2733;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        input {
+            width: 90%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #3a4a5a;
+            background-color: #1c2733;
+            color: white;
+            font-size: 16px;
+            text-align: center;
+            outline: none;
+        }
+        input:focus {
+            border-color: #64b5f6;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background-color: #64b5f6;
+            color: #17212b;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: 0.3s;
+        }
+        button:hover {
+            background-color: #42a5f5;
+        }
+        .price {
+            font-size: 16px;
+            margin-top: 15px;
+            color: #81c784;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🛍 فروشگاه میو پوینت</h2>
+        <div class="balance" id="balance">در حال دریافت اطلاعات...</div>
+        
+        <div class="input-group">
+            <input type="number" id="amount" placeholder="مقدار (به میلیون)" min="1">
+        </div>
+        
+        <div class="price" id="price">مبلغ: 0 تومان</div>
+        
+        <button onclick="submitOrder()">ثبت سفارش</button>
+    </div>
+
+    <script>
+        // اینجا تلگرام اطلاعات کاربر رو به ما میده
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // صفحه رو تمام‌صفحه میکنه
+
+        // گرفتن موجودی از بک‌اند (فعلا یه عدد تستی میذاریم)
+        // بعدا وصلش میکنیم به دیتابیس
+        document.getElementById("balance").innerText = "💰 موجودی: در حال اتصال...";
+
+        // محاسبه قیمت لحظه‌ای
+        const amountInput = document.getElementById("amount");
+        const priceDisplay = document.getElementById("price");
+        
+        amountInput.addEventListener("input", () => {
+            let val = parseInt(amountInput.value) || 0;
+            // محاسبه قیمت (مثلا هر میلیون 2500 تومان)
+            let price = val * 2500; 
+            priceDisplay.innerText = "مبلغ: " + price.toLocaleString() + " تومان";
+        });
+
+        // ارسال سفارش به ربات
+        function submitOrder() {
+            let amount = amountInput.value;
+            if (!amount || amount <= 0) {
+                alert("لطفا مقدار معتبر وارد کنید");
+                return;
+            }
+            // این دیتا رو به ربات میفرسته
+            tg.sendData(JSON.stringify({ action: "buy", amount: amount }));
+            tg.close();
+        }
+    </script>
+</body>
+</html>
