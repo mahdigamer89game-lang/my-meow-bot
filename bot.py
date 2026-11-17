@@ -183,6 +183,7 @@ def main_kb(uid=None):
         [KeyboardButton("💰 کیف پول"), KeyboardButton("📞 پشتیبانی")],
         [KeyboardButton("👥 دعوت دوستان"), KeyboardButton("🤝 چطور اعتماد کنم")],
         [KeyboardButton("📊 موجودی ما چقدره"), KeyboardButton("📖 راهنما")],
+        [KeyboardButton("🛍 فروشگاه (مینی اپ)")]
     ]
     if uid and is_admin(uid):
         rows.append([KeyboardButton("🔐 پنل ادمین")])
@@ -344,6 +345,12 @@ async def menu_router(update, context):
     elif text == "💵 قیمت پایین 100" and is_admin(uid):
         set_state(uid, "ADMIN_SET_PRICE_LOW")
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
+        elif text == "🛍 فروشگاه (مینی اپ)":
+    web_app_url = "https://my-meow-bot.onrender.com" # آدرس رندر خودت رو بذار
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("باز کردن فروشگاه", web_app=WebAppInfo(url=web_app_url))]
+    ])
+    await update.message.reply_text("برای ورود به فروشگاه روی دکمه زیر بزنید:", reply_markup=kb)
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
 async def show_users_page(update, context, page):
@@ -845,10 +852,49 @@ async def state_router(update, context):
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, state_router))
 
 async def start_web_server():
-    async def handle(request): return web.Response(text="Bot is running ✅")
+    async def handle(request): 
+        return web.Response(text="Bot is running ✅")
+
+    # 1. API برای گرفتن موجودی کاربر
+    async def api_get_user(request):
+        try:
+            uid = int(request.query.get('user_id', 0))
+            r = get_wallet(uid)
+            return web.json_response({"balance": r})
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=400)
+
+    # 2. API برای ثبت سفارش
+    async def api_buy(request):
+        try:
+            data = await request.json()
+            uid = int(data.get('user_id'))
+            amount = float(data.get('amount'))
+            
+            price = get_price_high() if amount >= 100 else get_price_low()
+            total = int(amount * price)
+            
+            new_bal = add_wallet(uid, -total, f"خرید {amount} میلیون از مینی اپ")
+            
+            if new_bal < 0: 
+                add_wallet(uid, total)
+                return web.json_response({"status": "error", "message": "موجودی کافی نیست"})
+                
+            return web.json_response({"status": "ok", "message": "سفارش ثبت شد"})
+        except Exception as e:
+            return web.json_response({"status": "error", "message": str(e)}, status=400)
+
+    # 3. تنظیم وب‌سرور و اضافه کردن APIها
     web_app = web.Application()
     web_app.router.add_get('/', handle)
     web_app.router.add_route('*', '/ping', handle)
+    web_app.router.add_get('/api/user', api_get_user)
+    web_app.router.add_post('/api/buy', api_buy)
+    
+    # 4. سرو کردن فایل index.html
+    web_app.router.add_get('/index.html', lambda r: web.FileResponse('index.html'))
+    web_app.router.add_get('/app', lambda r: web.FileResponse('index.html'))
+
     runner = web.AppRunner(web_app)
     await runner.setup()
     port = int(os.environ.get('PORT', 10000))
