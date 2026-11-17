@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import psycopg2
 from psycopg2 import pool
-TOKEN = os.environ.get("TOKEN")
+TOKEN = os.environ.get("8985946672:AAEE0OGCl9-et8VKhN_PmdGOWzgQ81xduC8")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_ID = 1713081033
 CARD_NUMBER = "5047061673513814"
