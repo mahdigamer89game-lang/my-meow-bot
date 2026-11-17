@@ -271,27 +271,27 @@ async def menu_router(update, context):
         txt += "\nپس از عضویت، روی دکمه «✅ تلاش مجدد» بزنید."
         await update.message.reply_text(txt, reply_markup=join_kb(not_joined))
         return
+    
     state, data = get_state(uid)
-    if state == "ADMIN_REPLY": return await do_send_reply(update, context, uid, data)
     if state == "WALLET_AMOUNT": return await do_wallet_amount(update, context, uid)
-    if state == "ADMIN_BROADCAST": return await do_broadcast(update, context, uid)
-    if state == "ADMIN_SET_PRICE_HIGH": return await do_set_price(update, context, uid, "price_high")
-    if state == "ADMIN_SET_PRICE_LOW": return await do_set_price(update, context, uid, "price_low")
     if state == "SUPPORT_MESSAGE": return await do_support_message(update, context, uid)
     if state == "BUY_AMOUNT": return await do_buy_amount(update, context, uid, data)
     if state == "BUY_CARD": return await do_buy_card(update, context, uid, data)
     if state == "WITHDRAW_AMOUNT": return await do_withdraw_amount(update, context, uid)
     if state == "WITHDRAW_CARD": return await do_withdraw_card(update, context, uid, data)
-    if state == "ADMIN_SEARCH": return await do_search_user(update, context, uid)
-    if state == "ADMIN_MSG_USER": return await do_msg_user(update, context, uid, data)
-    if state == "ADMIN_CHARGE_USER": return await do_charge_user(update, context, uid, data)
-    if state == "ADMIN_DEDUCT_USER": return await do_deduct_user(update, context, uid, data)
-    if state == "ADMIN_BONUS_USER": return await do_bonus_user(update, context, uid, data)
-    if state == "ADMIN_NOTE_USER": return await do_note_user(update, context, uid, data)
-    if state == "ADMIN_REF_USER": return await do_add_ref_user(update, context, uid, data)
+    if state == "ADMIN_MSG": return await do_admin_msg(update, context, uid, data)
+    if state == "ADMIN_CHARGE": return await do_admin_charge(update, context, uid, data)
+    if state == "ADMIN_DEDUCT": return await do_admin_deduct(update, context, uid, data)
+    if state == "ADMIN_REF": return await do_admin_ref(update, context, uid, data)
+    if state == "ADMIN_BONUS": return await do_admin_bonus(update, context, uid, data)
+    if state == "ADMIN_NOTE": return await do_admin_note(update, context, uid, data)
+    if state == "ADMIN_BROADCAST": return await do_broadcast(update, context, uid)
+    if state == "ADMIN_PRICE_HIGH": return await do_set_price(update, context, uid, "price_high")
+    if state == "ADMIN_PRICE_LOW": return await do_set_price(update, context, uid, "price_low")
     if state == "ADMIN_CHARGE_ALL": return await do_charge_all(update, context, uid)
     if state == "ADMIN_BONUS_ALL": return await do_bonus_all(update, context, uid)
     if state == "ADMIN_DEDUCT_BONUS_ALL": return await do_deduct_bonus_all(update, context, uid)
+    if state == "ADMIN_SEARCH": return await do_search_user(update, context, uid)
 
     if text == "🛒 خرید میو پوینت":
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("بالای 100 میلیون", callback_data="cat_high")], [InlineKeyboardButton("پایین 100 میلیون", callback_data="cat_low")]])
@@ -314,9 +314,17 @@ async def menu_router(update, context):
     elif text == "🤝 چطور اعتماد کنم":
         await update.message.reply_text("ما یک چنل داریم که در آن رضایت‌ها گذاشته می‌شوند\nhttps://t.me/Meow_Point_Free\n\nبرای دیدن رضایت‌ها در چنل سرچ کنید #رضایت\nو اگر سوالی داشتید در پی وی بگید @Goooorba1234", reply_markup=main_kb(uid))
     elif text == "📊 موجودی ما چقدره":
-        await update.message.reply_text("📊 موجودی ما چقدره؟\n\nموجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\nاما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.", reply_markup=main_kb(uid))
+        await update.message.reply_text("📊 موجودی ما تقریبا نامحدوده و هرچقدر بخواید می‌تونیم براتون جور کنیم.\nاما اگه مقداری که بخواید خیلی بالا باشه، یه کم طول می‌کشه تا براتون بزنیم.", reply_markup=main_kb(uid))
     elif text == "📖 راهنما":
         await update.message.reply_text("راهنمای خرید میوپوینت\n\nاول باید کیف پول را شارژ کنید\nوارد بخش کیف پول شوید و آن را شارژ کنید\nبعد از شارژ کردن به بخش خرید میو پوینت بروید\n\nاگر سوالی داشتید پی وی بگید @Goooorba1234", reply_markup=main_kb(uid))
+    
+    elif text == "🛍 فروشگاه (مینی اپ)":
+        web_app_url = "https://my-meow-bot.ofs4.onrender.com/app"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("باز کردن فروشگاه", web_app=WebAppInfo(url=web_app_url))]
+        ])
+        await update.message.reply_text("برای ورود به فروشگاه روی دکمه زیر بزنید:", reply_markup=kb)
+
     elif text == "🔐 پنل ادمین" and is_admin(uid):
         await update.message.reply_text("🔐 پنل ادمین\n\nلطفا یک گزینه را انتخاب کنید:", reply_markup=admin_kb())
     elif text == "👥 لیست کاربران" and is_admin(uid):
@@ -340,16 +348,13 @@ async def menu_router(update, context):
         set_state(uid, "ADMIN_BROADCAST")
         await update.message.reply_text("متن پیام همگانی را وارد کنید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت بالای 100" and is_admin(uid):
-        set_state(uid, "ADMIN_SET_PRICE_HIGH")
+        set_state(uid, "ADMIN_PRICE_HIGH")
         await update.message.reply_text(f"قیمت فعلی بالای 100: {get_price_high():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
     elif text == "💵 قیمت پایین 100" and is_admin(uid):
-        set_state(uid, "ADMIN_SET_PRICE_LOW")
+        set_state(uid, "ADMIN_PRICE_LOW")
         await update.message.reply_text(f"قیمت فعلی پایین 100: {get_price_low():,} تومان\n\nقیمت جدید:", reply_markup=cancel_kb())
-        elif text == "🛍 فروشگاه (مینی اپ)":
-    web_app_url = "https://my-meow-bot.onrender.com" # آدرس رندر خودت رو بذار
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("باز کردن فروشگاه", web_app=WebAppInfo(url=web_app_url))]
-    ])
+    else:
+        await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
     await update.message.reply_text("برای ورود به فروشگاه روی دکمه زیر بزنید:", reply_markup=kb)
     else:
         await update.message.reply_text("لطفا از دکمه‌ها استفاده کنید:", reply_markup=main_kb(uid))
