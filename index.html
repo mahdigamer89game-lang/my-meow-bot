@@ -2,122 +2,224 @@
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>فروشگاه میو پوینت</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #17212b;
-            color: #ffffff;
+            font-family: 'Vazirmatn', sans-serif;
+            background-color: var(--tg-theme-bg-color, #17212b);
+            color: var(--tg-theme-text-color, #ffffff);
             margin: 0;
             padding: 20px;
-            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
+
         .container {
+            width: 100%;
             max-width: 400px;
-            margin: 0 auto;
-            background-color: #232e3c;
-            padding: 20px;
-            border-radius: 15px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-        }
-        h2 {
-            color: #64b5f6;
-            margin-bottom: 20px;
-        }
-        .balance {
-            font-size: 18px;
-            margin-bottom: 20px;
-            background-color: #1c2733;
-            padding: 10px;
-            border-radius: 8px;
-        }
-        .input-group {
-            margin-bottom: 15px;
-        }
-        input {
-            width: 90%;
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid #3a4a5a;
-            background-color: #1c2733;
-            color: white;
-            font-size: 16px;
+            background-color: var(--tg-theme-secondary-bg-color, #232e3c);
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
             text-align: center;
-            outline: none;
         }
-        input:focus {
-            border-color: #64b5f6;
+
+        h2 {
+            color: var(--tg-theme-button-color, #64b5f6);
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 22px;
         }
-        button {
+
+        .balance-box {
+            background-color: var(--tg-theme-bg-color, #1c2733);
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .balance-amount {
+            font-weight: bold;
+            color: #4caf50;
+            font-size: 20px;
+            display: block;
+            margin-top: 5px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: right;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #8899a6;
+        }
+
+        input {
             width: 100%;
             padding: 15px;
-            background-color: #64b5f6;
-            color: #17212b;
+            border-radius: 12px;
+            border: 1px solid #3a4a5a;
+            background-color: var(--tg-theme-bg-color, #1c2733);
+            color: var(--tg-theme-text-color, #ffffff);
+            font-size: 18px;
+            font-family: inherit;
+            text-align: center;
+            outline: none;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            border-color: var(--tg-theme-button-color, #64b5f6);
+        }
+
+        .price-box {
+            font-size: 18px;
+            margin-bottom: 25px;
+            color: #ffb74d;
+            font-weight: bold;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background-color: var(--tg-theme-button-color, #64b5f6);
+            color: var(--tg-theme-button-text-color, #17212b);
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 18px;
             font-weight: bold;
+            font-family: inherit;
             cursor: pointer;
-            margin-top: 10px;
-            transition: 0.3s;
+            transition: opacity 0.2s, transform 0.1s;
         }
-        button:hover {
-            background-color: #42a5f5;
+
+        button:active {
+            transform: scale(0.98);
+            opacity: 0.8;
         }
-        .price {
-            font-size: 16px;
-            margin-top: 15px;
-            color: #81c784;
-            font-weight: bold;
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>🛍 فروشگاه میو پوینت</h2>
-        <div class="balance" id="balance">در حال دریافت اطلاعات...</div>
         
-        <div class="input-group">
-            <input type="number" id="amount" placeholder="مقدار (به میلیون)" min="1">
+        <div class="balance-box">
+            موجودی کیف پول شما:
+            <span class="balance-amount" id="balance">در حال دریافت...</span>
         </div>
         
-        <div class="price" id="price">مبلغ: 0 تومان</div>
+        <div class="input-group">
+            <label>مقدار مورد نظر (به میلیون):</label>
+            <input type="number" id="amount" placeholder="مثلا: 10" min="1">
+        </div>
         
-        <button onclick="submitOrder()">ثبت سفارش</button>
+        <div class="price-box" id="price">مبلغ: 0 تومان</div>
+        
+        <button id="submit-btn" onclick="submitOrder()">ثبت سفارش</button>
     </div>
 
     <script>
-        // اینجا تلگرام اطلاعات کاربر رو به ما میده
         const tg = window.Telegram.WebApp;
         tg.expand(); // صفحه رو تمام‌صفحه میکنه
+        tg.enableClosingConfirmation(); // جلوگیری از بستن ناخواسته
 
-        // گرفتن موجودی از بک‌اند (فعلا یه عدد تستی میذاریم)
-        // بعدا وصلش میکنیم به دیتابیس
-        document.getElementById("balance").innerText = "💰 موجودی: در حال اتصال...";
+        const user = tg.initDataUnsafe.user;
+        if (!user) {
+            alert("لطفا از داخل تلگرام وارد شوید.");
+        }
+
+        const userId = user.id;
+        
+        // گرفتن موجودی کاربر از بک‌اند (پایتون)
+        fetch(`/api/user?user_id=${userId}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById("balance").innerText = "خطا در دریافت";
+                } else {
+                    document.getElementById("balance").innerText = data.balance.toLocaleString() + " تومان";
+                }
+            })
+            .catch(err => {
+                document.getElementById("balance").innerText = "خطای شبکه";
+            });
 
         // محاسبه قیمت لحظه‌ای
         const amountInput = document.getElementById("amount");
         const priceDisplay = document.getElementById("price");
         
-        amountInput.addEventListener("input", () => {
-            let val = parseInt(amountInput.value) || 0;
-            // محاسبه قیمت (مثلا هر میلیون 2500 تومان)
-            let price = val * 2500; 
-            priceDisplay.innerText = "مبلغ: " + price.toLocaleString() + " تومان";
+        amountInput.addEventListener("input", function() {
+            let val = parseFloat(this.value) || 0;
+            if (val < 0) val = 0;
+            
+            // منطق قیمت: بالای 100 میلیون 2100، پایین 100 میلیون 2500
+            let price = (val >= 100) ? 2100 : 2500;
+            let total = val * price;
+            
+            priceDisplay.innerText = "مبلغ: " + total.toLocaleString() + " تومان";
         });
 
-        // ارسال سفارش به ربات
+        // ارسال سفارش به بک‌اند
         function submitOrder() {
-            let amount = amountInput.value;
+            let amount = parseFloat(amountInput.value);
             if (!amount || amount <= 0) {
-                alert("لطفا مقدار معتبر وارد کنید");
+                tg.showAlert("لطفا مقدار معتبر وارد کنید");
                 return;
             }
-            // این دیتا رو به ربات میفرسته
-            tg.sendData(JSON.stringify({ action: "buy", amount: amount }));
-            tg.close();
+
+            const btn = document.getElementById("submit-btn");
+            btn.innerHTML = '<span class="loading"></span>';
+            btn.disabled = true;
+
+            fetch('/api/buy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, amount: amount })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "ok") {
+                    tg.showAlert("✅ سفارش با موفقیت ثبت شد! به زودی برای شما واریز می‌شود.");
+                    setTimeout(() => tg.close(), 2000);
+                } else {
+                    tg.showAlert("❌ " + (data.message || "خطا در ثبت سفارش"));
+                    btn.innerHTML = 'ثبت سفارش';
+                    btn.disabled = false;
+                }
+            })
+            .catch(err => {
+                tg.showAlert("❌ خطای شبکه. لطفا دوباره تلاش کنید.");
+                btn.innerHTML = 'ثبت سفارش';
+                btn.disabled = false;
+            });
         }
     </script>
 </body>
